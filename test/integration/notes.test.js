@@ -48,7 +48,10 @@ describe('notes (integration)', { skip }, () => {
     assert.equal(res.body.note.title, 'Groceries');
     assert.deepEqual(res.body.note.labels, ['Personal']);
     assert.equal(res.body.note.pinned, true);
-    assert.equal(res.body.note.owner, ann.id);
+    assert.deepEqual(res.body.note.owner, { _id: ann.id, name: 'Ann', email: 'ann@example.com' });
+    assert.equal(res.body.note.isOwner, true);
+    assert.equal(res.body.note.color, 'default');
+    assert.equal(res.body.note.reminderAt, null);
   });
 
   it('lists only the caller’s notes, newest first, with pagination meta', async () => {
@@ -85,6 +88,7 @@ describe('notes (integration)', { skip }, () => {
     const res = await call(ann, 'GET', '/notes/summary');
     assert.deepEqual(res.body, {
       totalNotes: 3,
+      reminders: 0,
       labels: [
         { name: 'Ideas', count: 1 },
         { name: 'Work', count: 2 },
@@ -140,7 +144,94 @@ describe('notes (integration)', { skip }, () => {
     await create(ann, { title: 'a', labels: ['Work', 'Ideas'] });
     assert.equal((await call(ann, 'DELETE', '/notes/labels/Work')).status, 204);
     const summary = await call(ann, 'GET', '/notes/summary');
-    assert.deepEqual(summary.body, { totalNotes: 1, labels: [{ name: 'Ideas', count: 1 }] });
+    assert.deepEqual(summary.body, { totalNotes: 1, reminders: 0, labels: [{ name: 'Ideas', count: 1 }] });
     assert.equal((await call(ann, 'DELETE', '/notes/labels/Nope')).status, 404);
+  });
+
+  it('stores colour and reminder, lists and counts reminders', async () => {
+    const at = new Date(Date.now() + 86_400_000).toISOString();
+    const { body } = await create(ann, { title: 'Dentist', color: 'sky', reminderAt: at });
+    assert.equal(body.note.color, 'sky');
+    assert.equal(body.note.reminderAt, at);
+    await create(ann, { title: 'No reminder' });
+    const list = await call(ann, 'GET', '/notes?reminder=true');
+    assert.deepEqual(list.body.data.map((n) => n.title), ['Dentist']);
+    assert.equal((await call(ann, 'GET', '/notes/summary')).body.reminders, 1);
+    const cleared = await call(ann, 'PATCH', `/notes/${body.note._id}`, { reminderAt: null });
+    assert.equal(cleared.body.note.reminderAt, null);
+  });
+
+  it('copies a note into a new unpinned, unshared note owned by the caller', async () => {
+    const { body } = await create(ann, { title: 'Original', content: 'x', labels: ['Work'], pinned: true, color: 'mint' });
+    await call(ann, 'POST', `/notes/${body.note._id}/collaborators`, { email: 'bob@example.com' });
+    const copy = await call(bob, 'POST', `/notes/${body.note._id}/copy`);
+    assert.equal(copy.status, 201);
+    assert.notEqual(copy.body.note._id, body.note._id);
+    assert.equal(copy.body.note.owner._id, bob.id);
+    assert.equal(copy.body.note.pinned, false);
+    assert.deepEqual(copy.body.note.collaborators, []);
+    assert.equal(copy.body.note.color, 'mint');
+  });
+
+  describe('sharing', () => {
+    let noteId;
+    beforeEach(async () => {
+      noteId = (await create(ann, { title: 'Shared plan', labels: ['Work'] })).body.note._id;
+    });
+
+    it('owner shares by email; the collaborator sees, edits and finds it in lists and summary', async () => {
+      const shared = await call(ann, 'POST', `/notes/${noteId}/collaborators`, { email: 'BOB@example.com' });
+      assert.equal(shared.status, 200);
+      assert.deepEqual(shared.body.note.collaborators, [{ _id: bob.id, name: 'Bob', email: 'bob@example.com' }]);
+
+      const list = await call(bob, 'GET', '/notes');
+      assert.deepEqual(list.body.data.map((n) => [n.title, n.isOwner]), [['Shared plan', false]]);
+      assert.equal((await call(bob, 'GET', '/notes/summary')).body.totalNotes, 1);
+      const edit = await call(bob, 'PATCH', `/notes/${noteId}`, { content: 'Edited by Bob' });
+      assert.equal(edit.body.note.content, 'Edited by Bob');
+    });
+
+    it('collaborators cannot delete, share or remove others', async () => {
+      await signUp('Cara');
+      await call(ann, 'POST', `/notes/${noteId}/collaborators`, { email: 'bob@example.com' });
+      assert.equal((await call(bob, 'DELETE', `/notes/${noteId}`)).status, 404);
+      assert.equal((await call(bob, 'POST', `/notes/${noteId}/collaborators`, { email: 'cara@example.com' })).status, 404);
+      assert.equal((await call(bob, 'DELETE', `/notes/${noteId}/collaborators/${ann.id}`)).status, 404);
+    });
+
+    it('a collaborator can leave; the owner can remove; then access is gone', async () => {
+      await call(ann, 'POST', `/notes/${noteId}/collaborators`, { email: 'bob@example.com' });
+      assert.equal((await call(bob, 'DELETE', `/notes/${noteId}/collaborators/${bob.id}`)).status, 204);
+      assert.equal((await call(bob, 'GET', `/notes/${noteId}`)).status, 404);
+      await call(ann, 'POST', `/notes/${noteId}/collaborators`, { email: 'bob@example.com' });
+      assert.equal((await call(ann, 'DELETE', `/notes/${noteId}/collaborators/${bob.id}`)).status, 204);
+      assert.equal((await call(bob, 'GET', `/notes/${noteId}`)).status, 404);
+    });
+
+    it('rejects unknown emails, sharing with yourself, and non-owners', async () => {
+      const unknown = await call(ann, 'POST', `/notes/${noteId}/collaborators`, { email: 'nobody@example.com' });
+      assert.equal(unknown.status, 404);
+      assert.equal(unknown.body.error.code, 'USER_NOT_FOUND');
+      assert.equal((await call(ann, 'POST', `/notes/${noteId}/collaborators`, { email: 'ann@example.com' })).status, 400);
+    });
+
+    it('label rename reaches shared notes for collaborators', async () => {
+      await call(ann, 'POST', `/notes/${noteId}/collaborators`, { email: 'bob@example.com' });
+      await call(bob, 'PATCH', '/notes/labels/Work', { name: 'Projects' });
+      assert.deepEqual((await call(ann, 'GET', `/notes/${noteId}`)).body.note.labels, ['Projects']);
+    });
+  });
+
+  it('image upload answers 503 while storage is not configured', async () => {
+    const { body } = await create(ann, { title: 'With image' });
+    const form = new FormData();
+    form.append('image', new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), 'a.png');
+    const res = await fetch(`${api.baseUrl}/notes/${body.note._id}/images`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ann.token}` },
+      body: form,
+    });
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).error.code, 'UPLOADS_DISABLED');
   });
 });

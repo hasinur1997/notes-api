@@ -2,6 +2,7 @@
  * Turns every error into the standard `{ error: { message, code } }` response.
  */
 import mongoose from 'mongoose';
+import multer from 'multer';
 import { ZodError } from 'zod';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -57,6 +58,12 @@ export function toApiError(err) {
     return new ApiError(409, `A record with this ${field} already exists`, 'DUPLICATE_KEY');
   }
 
+  // Errors raised by multer while reading an upload.
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') return new ApiError(413, 'Images must be 5 MB or smaller', 'PAYLOAD_TOO_LARGE');
+    return new ApiError(400, 'Send one image in the "image" field', 'INVALID_UPLOAD');
+  }
+
   // Errors raised by express.json() (body-parser).
   if (err?.type === 'entity.parse.failed') {
     return new ApiError(400, 'Malformed JSON body', 'INVALID_JSON');
@@ -69,7 +76,7 @@ export function toApiError(err) {
 }
 
 /**
- * Express error middleware. Logs unexpected errors and sends the standard error body.
+ * Express error middleware. Logs only unexpected errors and sends the standard error body.
  * Stack traces are included only outside production, and only for unexpected errors.
  *
  * @param {unknown} err - The error.
@@ -83,7 +90,8 @@ export function errorHandler(err, req, res, next) {
   const known = toApiError(err);
   const status = known?.status ?? 500;
 
-  if (status >= 500) console.error(err);
+  // Only unexpected errors are logged; expected ApiErrors (including 503s) are normal responses.
+  if (!known) console.error(err);
 
   const error = {
     message: known?.message ?? 'Internal server error',

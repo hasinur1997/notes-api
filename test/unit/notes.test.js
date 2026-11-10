@@ -3,16 +3,25 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import mongoose from 'mongoose';
 import { Note, normalizeLabels } from '../../src/models/Note.js';
-import { buildNotesFilter } from '../../src/services/noteService.js';
+import { accessibleBy, buildNotesFilter } from '../../src/services/noteService.js';
 import { escapeRegex } from '../../src/utils/escapeRegex.js';
-import { createNoteBody, listNotesQuery, renameLabelBody, updateNoteBody } from '../../src/validators/notes.js';
+import {
+  addCollaboratorBody,
+  createNoteBody,
+  listNotesQuery,
+  renameLabelBody,
+  updateNoteBody,
+} from '../../src/validators/notes.js';
 import { request, startServer } from '../helpers/http.js';
 
 const ownerId = new mongoose.Types.ObjectId();
 
 describe('Note model', () => {
-  it('defines exactly the one allowed index', () => {
-    assert.deepEqual(Note.schema.indexes(), [[{ owner: 1, _id: -1 }, {}]]);
+  it('defines exactly the two allowed indexes', () => {
+    assert.deepEqual(Note.schema.indexes(), [
+      [{ owner: 1, _id: -1 }, {}],
+      [{ collaborators: 1, _id: -1 }, {}],
+    ]);
   });
 
   it('has no field-level index options', () => {
@@ -22,11 +31,19 @@ describe('Note model', () => {
     assert.deepEqual(offenders, []);
   });
 
-  it('defaults content, labels and pinned', () => {
+  it('defaults content, labels, pinned, colour, reminder, collaborators and images', () => {
     const note = new Note({ owner: ownerId, title: 'A' });
     assert.equal(note.content, '');
     assert.deepEqual([...note.labels], []);
     assert.equal(note.pinned, false);
+    assert.equal(note.color, 'default');
+    assert.equal(note.reminderAt, null);
+    assert.deepEqual([...note.collaborators], []);
+    assert.deepEqual([...note.images], []);
+  });
+
+  it('rejects unknown colours', () => {
+    assert.ok(new Note({ owner: ownerId, title: 'A', color: 'neon' }).validateSync().errors.color);
   });
 
   it('requires owner and title', () => {
@@ -54,18 +71,23 @@ describe('escapeRegex', () => {
   });
 });
 
-describe('buildNotesFilter', () => {
-  it('always filters by owner', () => {
-    assert.deepEqual(buildNotesFilter(ownerId), { owner: ownerId });
+describe('accessibleBy / buildNotesFilter', () => {
+  it('matches notes the user owns or collaborates on, each branch starting with an indexed field', () => {
+    assert.deepEqual(accessibleBy(ownerId), { $or: [{ owner: ownerId }, { collaborators: ownerId }] });
   });
 
-  it('adds pinned, label and an escaped case-insensitive search', () => {
-    const filter = buildNotesFilter(ownerId, { pinned: false, label: 'Work', q: 'a.b' });
-    assert.equal(filter.pinned, false);
-    assert.equal(filter.labels, 'Work');
-    assert.equal(filter.$or.length, 2);
-    assert.equal(filter.$or[0].title.source, 'a\\.b');
-    assert.equal(filter.$or[0].title.flags, 'i');
+  it('applies every filter inside both branches, with an escaped case-insensitive search', () => {
+    const { $or: branches } = buildNotesFilter(ownerId, { pinned: false, label: 'Work', q: 'a.b', reminder: true });
+    assert.equal(branches.length, 2);
+    for (const branch of branches) {
+      assert.equal(branch.pinned, false);
+      assert.equal(branch.labels, 'Work');
+      assert.deepEqual(branch.reminderAt, { $ne: null });
+      assert.equal(branch.$or[0].title.source, 'a\\.b');
+      assert.equal(branch.$or[0].title.flags, 'i');
+    }
+    assert.equal(branches[0].owner, ownerId);
+    assert.equal(branches[1].collaborators, ownerId);
   });
 });
 
@@ -96,6 +118,29 @@ describe('notes validators', () => {
     assert.equal(updateNoteBody.safeParse({ owner: 'x' }).success, false);
   });
 
+  it('colour must be a palette key', () => {
+    assert.equal(createNoteBody.safeParse({ title: 'A', color: 'amber' }).success, true);
+    assert.equal(createNoteBody.safeParse({ title: 'A', color: '#ff0000' }).success, false);
+  });
+
+  it('reminder: ISO date with offset or null; not absurdly far ahead', () => {
+    const soon = new Date(Date.now() + 3600_000).toISOString();
+    assert.ok(updateNoteBody.parse({ reminderAt: soon }).reminderAt instanceof Date);
+    assert.equal(updateNoteBody.parse({ reminderAt: null }).reminderAt, null);
+    assert.equal(updateNoteBody.safeParse({ reminderAt: 'tomorrow' }).success, false);
+    assert.equal(updateNoteBody.safeParse({ reminderAt: '2099-01-01T00:00:00Z' }).success, false);
+  });
+
+  it('collaborators and images are not editable through the note body', () => {
+    assert.equal(updateNoteBody.safeParse({ collaborators: [ownerId.toString()] }).success, false);
+    assert.equal(updateNoteBody.safeParse({ images: [] }).success, false);
+  });
+
+  it('add collaborator: needs a valid email', () => {
+    assert.equal(addCollaboratorBody.parse({ email: ' Bob@Example.com ' }).email, 'bob@example.com');
+    assert.equal(addCollaboratorBody.safeParse({ email: 'bob' }).success, false);
+  });
+
   it('rename label: requires a non-empty new name', () => {
     assert.equal(renameLabelBody.safeParse({ name: ' ' }).success, false);
     assert.equal(renameLabelBody.safeParse({ name: 'Projects' }).success, true);
@@ -121,6 +166,11 @@ describe('/api/notes requires authentication', () => {
     ['DELETE', `/notes/${id}`],
     ['PATCH', '/notes/labels/Work'],
     ['DELETE', '/notes/labels/Work'],
+    ['POST', `/notes/${id}/copy`],
+    ['POST', `/notes/${id}/collaborators`],
+    ['DELETE', `/notes/${id}/collaborators/${id}`],
+    ['POST', `/notes/${id}/images`],
+    ['DELETE', `/notes/${id}/images/${id}`],
   ]) {
     it(`${method} ${path} -> 401`, async () => {
       const res = await request(`${api.baseUrl}${path}`, { method, body: method === 'GET' ? undefined : {} });

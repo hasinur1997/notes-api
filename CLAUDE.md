@@ -43,21 +43,22 @@
 1. **Indexes are defined ONLY with `schema.index()`.**
    - Never use `unique: true`, `index: true`, or `sparse: true` on field definitions.
    - Never call `createIndex` from code or create indexes manually in Atlas.
-2. **Only these 4 custom indexes may exist.** Do not add, remove or change any index without explicit approval from the developer.
+2. **Only these 5 custom indexes may exist.** Do not add, remove or change any index without explicit approval from the developer.
 
    | Collection | Index | Options |
    |---|---|---|
    | users | `{ email: 1 }` | `{ unique: true }` |
    | users | `{ interests: 1 }` | — |
    | notes | `{ owner: 1, _id: -1 }` | — |
+   | notes | `{ collaborators: 1, _id: -1 }` | — (approved 2026-11-10 for note sharing) |
    | posts | `{ author: 1, _id: -1 }` | — |
 
 3. **Every list endpoint sorts by `{ _id: -1 }`.** Never sort by `createdAt` (there is no index for it, on purpose).
-   Note filters (`pinned`, `labels`, search regex) are applied on top of the `{ owner: 1, _id: -1 }` index scan; they never get their own index. Search terms are always regex-escaped.
+   Note queries use `accessibleBy(userId, conditions)`: `{ $or: [{ owner, ...conditions }, { collaborators, ...conditions }] }`. Each branch uses its own index and MongoDB merges them in `_id` order (`SORT_MERGE`, no in-memory sort). Filters (`pinned`, `labels`, `reminderAt`, search regex) are applied inside both branches; they never get their own index. Search terms are always regex-escaped.
 4. **Every list endpoint is paginated.** Default `limit=10`, max `limit=50`, `page` starts at 1.
 5. **Scenario 1 (group by interests) uses exactly ONE `User.aggregate()` call.** No `find`, `countDocuments`, `populate` or any other DB call in that code path. Pagination happens inside the pipeline with `$facet`.
 6. **Scenario 2 (user's posts) is a single pipeline on `users` with a `$lookup` to `posts`.** No `populate`, no second query.
-7. **Ownership is enforced inside the query**, e.g. `Note.findOneAndUpdate({ _id, owner: req.user.id }, ...)`. Never fetch a document first and compare the owner in JavaScript afterwards.
+7. **Access is enforced inside the query**, e.g. `Note.findOneAndUpdate({ _id, ...accessibleBy(userId) }, ...)` for read/edit and `{ _id, owner: userId }` for owner-only actions (delete, sharing). Never fetch a document first and compare the owner in JavaScript afterwards.
 8. **Passwords never leave the server.** Password field is `select: false` and removed in `toJSON`.
 9. **No templates or starter kits.** Express is hand-wired.
 10. **No secrets in git.** Only `.env.example` is committed.
@@ -103,7 +104,7 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | Collection | Fields |
 |---|---|
 | users | `name`, `email` (lowercase, trimmed), `password` (`select: false`), `role` (`user` \| `admin`, default `user`), `interests` ([String], lowercased, trimmed, deduped), timestamps |
-| notes | `owner` (ObjectId → users, required), `title` (required, max 200), `content` (max 20,000), `labels` ([String], max 10, trimmed, case-insensitive deduped, each max 30), `pinned` (Boolean, default `false`), timestamps |
+| notes | `owner` (ObjectId → users, required), `title` (required, max 200), `content` (Markdown, max 20,000), `labels` ([String], max 10, trimmed, case-insensitive deduped, each max 30), `pinned` (Boolean, default `false`), `color` (palette key, default `default`), `reminderAt` (Date or `null`), `collaborators` ([ObjectId → users], max 10), `images` ([{ url, publicId, width, height }], max 5, stored on Cloudinary), timestamps |
 | posts | `author` (ObjectId → users, required), `title` (required), `body`, timestamps |
 
 ### 3.4 Endpoints
@@ -117,7 +118,12 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | GET, POST | `/api/notes` | Auth — GET filters: `?pinned=true\|false`, `?label=`, `?q=` (search title/content) |
 | GET | `/api/notes/summary` | Auth — `{ totalNotes, labels: [{ name, count }] }` in one aggregate |
 | PATCH, DELETE | `/api/notes/labels/:name` | Auth — rename (`{ name }`) or remove a label on all of the caller's notes |
-| GET, PATCH, DELETE | `/api/notes/:id` | Owner (admin may GET) |
+| GET, PATCH | `/api/notes/:id` | Owner or collaborator (admin may GET) |
+| DELETE | `/api/notes/:id` | Owner only (also deletes stored images) |
+| POST | `/api/notes/:id/copy` | Owner or collaborator — copy becomes the caller's own note |
+| POST | `/api/notes/:id/collaborators` | Owner only — `{ email }` of a registered user |
+| DELETE | `/api/notes/:id/collaborators/:userId` | Owner, or the collaborator leaving |
+| POST, DELETE | `/api/notes/:id/images[/:imageId]` | Owner or collaborator — multipart `image`, JPEG/PNG/WebP/GIF ≤ 5 MB, rate-limited; 503 without Cloudinary config |
 | GET, POST | `/api/admin/users` | Admin |
 | GET, PATCH, DELETE | `/api/admin/users/:id` | Admin |
 | GET | `/api/admin/notes?owner=` | Admin |
@@ -146,7 +152,9 @@ The frontend (`notes-web`) depends on these shapes. Do not change them.
 | 400 | Validation error, invalid ObjectId |
 | 401 | Missing / invalid / expired token, or token user no longer exists |
 | 403 | Non-admin on admin route; admin deleting/demoting themselves |
-| 404 | Not found **or not owned** (never reveal that another user's note exists) |
+| 404 | Not found **or not accessible** (never reveal that another user's note exists) |
+| 413 | JSON body over 100kb, or image over 5 MB |
+| 503 | Image uploads requested while Cloudinary is not configured |
 | 409 | Duplicate email (catch Mongo error code `11000`) |
 | 429 | Login rate limit |
 
@@ -158,7 +166,7 @@ The frontend (`notes-web`) depends on these shapes. Do not change them.
 - `requireRole('admin')` on the whole `/api/admin` router
 - Validate `body`, `params` and `query` with zod in every route; reject unknown fields with `.strict()`
 - Whitelist updatable fields explicitly; never spread `req.body` into an update
-- Deleting a user also deletes their notes and posts
+- Deleting a user also deletes their notes (and their images) and posts, and removes them from `collaborators` on other notes
 - helmet, CORS restricted to `CORS_ORIGIN`, JSON body limit `100kb`
 - Production errors never include stack traces
 
@@ -199,6 +207,10 @@ ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=
 # Optional: enables database tests in `npm test`. The database name must contain "test"; it is dropped after the run.
 TEST_MONGO_URI=
+# Optional: image uploads. Without them, image endpoints return 503.
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
 ```
 
 ---
@@ -291,7 +303,7 @@ export async function listNotes(ownerId, { page, limit }) { ... }
    Commits are authored only by the repository owner (the local `user.name` / `user.email`). Never add `Co-Authored-By:` trailers, "Generated with" lines or any other AI attribution to commit messages or PR descriptions.
 3. **Ask before** adding a dependency, an index or an endpoint not listed here.
 4. **After any query or model change**, run `npm run explain` and confirm the query still uses the intended index.
-5. **Before marking work done**, run `npm test` (all tests pass) and `npm run sync-indexes` (only `_id` + the 4 indexes exist).
+5. **Before marking work done**, run `npm test` (all tests pass) and `npm run sync-indexes` (only `_id` + the 5 indexes exist).
 6. **Do not invent requirements.** If something is not in this file or `../docs/project-over.md`, ask.
 
 ---

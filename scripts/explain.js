@@ -9,9 +9,11 @@ import mongoose from 'mongoose';
 import { connectDB, disconnectDB } from '../src/config/db.js';
 import { Note } from '../src/models/Note.js';
 import { User } from '../src/models/User.js';
-import { buildNotesFilter, buildSummaryPipeline } from '../src/services/noteService.js';
+import { accessibleBy, buildNotesFilter, buildSummaryPipeline } from '../src/services/noteService.js';
 
 const someUserId = new mongoose.Types.ObjectId();
+/** Owned-or-shared queries must use both note indexes (one per $or branch). */
+const BOTH = { all: ['owner_1__id_-1', 'collaborators_1__id_-1'] };
 const someNoteId = new mongoose.Types.ObjectId();
 
 /** Every query in the index map: a name, the expected index, and a function returning its explain output. */
@@ -27,41 +29,52 @@ const QUERIES = [
     run: () => User.findById(someUserId).explain('executionStats'),
   },
   {
-    name: 'notes list (newest first)',
-    index: 'owner_1__id_-1',
+    name: 'notes list (owned + shared, newest first)',
+    index: BOTH,
     run: () => Note.find(buildNotesFilter(someUserId)).sort({ _id: -1 }).limit(10).explain('executionStats'),
   },
   {
     name: 'notes list: pinned only',
-    index: 'owner_1__id_-1',
+    index: BOTH,
     run: () =>
       Note.find(buildNotesFilter(someUserId, { pinned: true })).sort({ _id: -1 }).limit(10).explain('executionStats'),
   },
   {
     name: 'notes list: by label',
-    index: 'owner_1__id_-1',
+    index: BOTH,
     run: () =>
       Note.find(buildNotesFilter(someUserId, { label: 'Work' })).sort({ _id: -1 }).limit(10).explain('executionStats'),
   },
   {
     name: 'notes list: search',
-    index: 'owner_1__id_-1',
+    index: BOTH,
     run: () =>
       Note.find(buildNotesFilter(someUserId, { q: 'index' })).sort({ _id: -1 }).limit(10).explain('executionStats'),
   },
   {
-    name: 'note by id + owner (get / update / delete)',
+    name: 'note by id, owner or collaborator (get / update)',
+    index: ['_id_', 'owner_1__id_-1', 'collaborators_1__id_-1'],
+    run: () => Note.findOne({ _id: someNoteId, ...accessibleBy(someUserId) }).explain('executionStats'),
+  },
+  {
+    name: 'note by id + owner (delete / share)',
     index: ['_id_', 'owner_1__id_-1'],
     run: () => Note.findOne({ _id: someNoteId, owner: someUserId }).explain('executionStats'),
   },
   {
+    name: 'notes with reminders',
+    index: BOTH,
+    run: () =>
+      Note.find(buildNotesFilter(someUserId, { reminder: true })).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
     name: 'labels: rename / delete (updateMany filter)',
-    index: 'owner_1__id_-1',
-    run: () => Note.find({ owner: someUserId, labels: 'Work' }).explain('executionStats'),
+    index: BOTH,
+    run: () => Note.find(accessibleBy(someUserId, { labels: 'Work' })).explain('executionStats'),
   },
   {
     name: 'notes summary aggregate',
-    index: 'owner_1__id_-1',
+    index: BOTH,
     run: () => Note.aggregate(buildSummaryPipeline(someUserId)).explain('executionStats'),
   },
 ];
@@ -96,9 +109,10 @@ async function explainAll() {
   let ok = true;
   for (const query of QUERIES) {
     const { stages, indexes } = collectStages(winningPlan(await query.run()));
-    const expected = [].concat(query.index);
-    const usesIndex =
-      expected.some((name) => indexes.includes(name)) || (expected.includes('_id_') && stages.includes('IDHACK'));
+    const usesIndex = query.index.all
+      ? query.index.all.every((name) => indexes.includes(name))
+      : [].concat(query.index).some((name) => indexes.includes(name)) ||
+        ([].concat(query.index).includes('_id_') && stages.includes('IDHACK'));
     const pass = usesIndex && !stages.includes('COLLSCAN') && !stages.includes('SORT');
     ok &&= pass;
     console.log(`${pass ? 'PASS' : 'FAIL'}  ${query.name}`);

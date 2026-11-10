@@ -30,6 +30,10 @@ const envSchema = z.object({
   ADMIN_NAME: z.string().min(1).default('Admin'),
   ADMIN_EMAIL: z.email().optional(),
   ADMIN_PASSWORD: z.string().optional(),
+  // Optional: image uploads are disabled (503) until all three are set.
+  CLOUDINARY_CLOUD_NAME: z.string().optional(),
+  CLOUDINARY_API_KEY: z.string().optional(),
+  CLOUDINARY_API_SECRET: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
