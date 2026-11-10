@@ -95,7 +95,7 @@ export async function updateNote(req, res) {
 export async function deleteNote(req, res) {
   const deleted = await noteService.deleteNote(req.params.id, req.user._id);
   if (!deleted) throw ApiError.notFound(NOTE_NOT_FOUND);
-  await deleteImages(deleted.images.map((image) => image.publicId));
+  await deleteImages((deleted.images ?? []).map((image) => image.publicId));
   res.status(204).end();
 }
 

@@ -59,6 +59,26 @@ function pickEditable(input) {
 }
 
 /**
+ * Fills in defaults for fields that notes created before they existed may lack.
+ * Lean reads skip schema defaults, so every note leaving the service goes through this.
+ *
+ * @param {object} note - Lean note.
+ * @returns {object} The note with every current field present.
+ */
+export function withDefaults(note) {
+  return {
+    content: '',
+    labels: [],
+    pinned: false,
+    color: 'default',
+    reminderAt: null,
+    collaborators: [],
+    images: [],
+    ...note,
+  };
+}
+
+/**
  * Replaces owner and collaborator ids with { _id, name, email } using ONE extra query on
  * users (by _id, always indexed) for the whole page. Adds `isOwner` for the requesting user.
  *
@@ -66,7 +86,8 @@ function pickEditable(input) {
  * @param {import('mongoose').Types.ObjectId} userId - The requesting user.
  * @returns {Promise<object[]>} Notes with people attached.
  */
-export async function attachPeople(notes, userId) {
+export async function attachPeople(rawNotes, userId) {
+  const notes = rawNotes.map(withDefaults);
   const ids = new Set();
   for (const note of notes) {
     ids.add(String(note.owner));
@@ -263,7 +284,8 @@ export async function addCollaborator(noteId, ownerId, email) {
   if (!note) throw ApiError.notFound('Note not found');
   if (!person) throw ApiError.notFound('No account uses that email', 'USER_NOT_FOUND');
   if (String(person._id) === String(ownerId)) throw ApiError.badRequest('You already own this note', 'IS_OWNER');
-  if (note.collaborators.length >= MAX_COLLABORATORS && !note.collaborators.some((id) => String(id) === String(person._id))) {
+  const current = note.collaborators ?? [];
+  if (current.length >= MAX_COLLABORATORS && !current.some((id) => String(id) === String(person._id))) {
     throw ApiError.badRequest(`A note can be shared with at most ${MAX_COLLABORATORS} people`, 'LIMIT_REACHED');
   }
 
@@ -303,7 +325,7 @@ export async function removeCollaborator(noteId, actorId, collaboratorId) {
 export async function addImage(noteId, userId, upload) {
   const note = await Note.findOne({ _id: noteId, ...accessibleBy(userId) }, { images: 1 }).lean();
   if (!note) throw ApiError.notFound('Note not found');
-  if (note.images.length >= MAX_IMAGES_PER_NOTE) {
+  if ((note.images ?? []).length >= MAX_IMAGES_PER_NOTE) {
     throw ApiError.badRequest(`A note can have at most ${MAX_IMAGES_PER_NOTE} images`, 'LIMIT_REACHED');
   }
   const image = await upload(note);
@@ -330,7 +352,8 @@ export async function removeImage(noteId, userId, imageId) {
     { returnDocument: 'before' },
   ).lean();
   if (!before) return null;
-  const removed = before.images.find((image) => String(image._id) === imageId);
-  const after = { ...before, images: before.images.filter((image) => String(image._id) !== imageId) };
+  const images = before.images ?? [];
+  const removed = images.find((image) => String(image._id) === imageId);
+  const after = { ...before, images: images.filter((image) => String(image._id) !== imageId) };
   return { note: (await attachPeople([after], userId))[0], removed };
 }

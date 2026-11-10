@@ -234,4 +234,27 @@ describe('notes (integration)', { skip }, () => {
     assert.equal(res.status, 503);
     assert.equal((await res.json()).error.code, 'UPLOADS_DISABLED');
   });
+
+  it('reads notes created before colour, reminders, sharing and images existed', async () => {
+    // Insert directly, bypassing Mongoose defaults, like documents written by older versions.
+    const { insertedId } = await Note.collection.insertOne({
+      owner: new Note({ owner: ann.id, title: 'x' }).owner,
+      title: 'Old note',
+      content: 'Before the toolbar',
+      labels: ['Work'],
+      pinned: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const list = await call(ann, 'GET', '/notes?pinned=false');
+    assert.equal(list.status, 200);
+    const old = list.body.data.find((n) => n._id === String(insertedId));
+    assert.deepEqual(
+      { color: old.color, reminderAt: old.reminderAt, collaborators: old.collaborators, images: old.images },
+      { color: 'default', reminderAt: null, collaborators: [], images: [] },
+    );
+    assert.equal((await call(ann, 'GET', `/notes/${insertedId}`)).status, 200);
+    assert.equal((await call(ann, 'POST', `/notes/${insertedId}/collaborators`, { email: 'bob@example.com' })).status, 200);
+    assert.equal((await call(ann, 'DELETE', `/notes/${insertedId}`)).status, 204);
+  });
 });
