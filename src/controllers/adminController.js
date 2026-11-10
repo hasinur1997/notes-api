@@ -5,9 +5,9 @@
 import * as adminService from '../services/adminService.js';
 
 /**
- * GET /api/admin/users: a page of users, or one user by exact email.
+ * GET /api/admin/users: a page of users, optionally filtered by name or email.
  *
- * @param {import('express').Request} req - Query: page, limit, email?.
+ * @param {import('express').Request} req - Query: page, limit, q?.
  * @param {import('express').Response} res - 200 `{ data, meta }`.
  * @returns {Promise<void>}
  */
@@ -61,6 +61,18 @@ export async function updateUser(req, res) {
 export async function deleteUser(req, res) {
   await adminService.deleteUser(req.user, req.params.id);
   res.status(204).end();
+}
+
+/**
+ * GET /api/admin/users/:id/notes: a user's notes as they see them (owned + shared), read-only.
+ *
+ * @param {import('express').Request} req - Params: id. Query: page, limit, pinned?.
+ * @param {import('express').Response} res - 200 `{ data, meta }`.
+ * @returns {Promise<void>}
+ * @throws {ApiError} 404 if the user does not exist.
+ */
+export async function listUserNotes(req, res) {
+  res.json(await adminService.listUserNotes(req.user._id, req.params.id, req.query));
 }
 
 /**

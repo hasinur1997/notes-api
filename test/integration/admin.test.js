@@ -77,13 +77,36 @@ describe('admin (integration)', { skip }, () => {
     }
   });
 
-  it('finds a user by exact email (case-insensitive) or returns an empty list', async () => {
-    const found = await call(admin, 'GET', '/admin/users?email=ANN@example.com');
-    assert.deepEqual(found.body.data.map((u) => u.name), ['Ann']);
-    assert.equal(found.body.meta.total, 1);
-    const missing = await call(admin, 'GET', '/admin/users?email=nobody@example.com');
-    assert.deepEqual(missing.body.data, []);
-    assert.equal((await call(admin, 'GET', '/admin/users?email=not-an-email')).status, 400);
+  it('searches users by any part of the name or email, case-insensitive and escaped', async () => {
+    const byName = await call(admin, 'GET', '/admin/users?q=AN');
+    assert.deepEqual(byName.body.data.map((u) => u.name), ['Ann']);
+    const byEmail = await call(admin, 'GET', '/admin/users?q=example.com&limit=2');
+    assert.deepEqual(byEmail.body.meta, { page: 1, limit: 2, total: 3, totalPages: 2 });
+    assert.equal((await call(admin, 'GET', `/admin/users?q=${encodeURIComponent('.*')}`)).body.meta.total, 0);
+    assert.equal((await call(admin, 'GET', '/admin/users?email=ann@example.com')).status, 400, 'unknown param');
+  });
+
+  it('lists a user’s notes as they see them (owned + shared), with a pinned filter, read-only', async () => {
+    await call(ann, 'POST', '/notes', { title: 'ann pinned', pinned: true });
+    await call(ann, 'POST', '/notes', { title: 'ann plain' });
+    const shared = await call(bob, 'POST', '/notes', { title: 'bob shares' });
+    await call(bob, 'POST', `/notes/${shared.body.note._id}/collaborators`, { email: ann.email });
+    await call(bob, 'POST', '/notes', { title: 'bob private' });
+
+    const all = await call(admin, 'GET', `/admin/users/${ann.id}/notes`);
+    assert.equal(all.status, 200);
+    assert.deepEqual(all.body.data.map((n) => n.title), ['bob shares', 'ann plain', 'ann pinned']);
+    assert.equal(all.body.data[0].owner.name, 'Bob');
+    assert.equal(all.body.data.every((n) => n.isOwner === false), true);
+    const pinned = await call(admin, 'GET', `/admin/users/${ann.id}/notes?pinned=true`);
+    assert.deepEqual(pinned.body.data.map((n) => n.title), ['ann pinned']);
+    const others = await call(admin, 'GET', `/admin/users/${ann.id}/notes?pinned=false&limit=1`);
+    assert.deepEqual(others.body.meta, { page: 1, limit: 1, total: 2, totalPages: 2 });
+
+    assert.equal((await call(admin, 'GET', '/admin/users/0123456789abcdef01234567/notes')).status, 404);
+    assert.equal((await call(admin, 'GET', `/admin/users/${ann.id}/notes?pinned=yes`)).status, 400);
+    assert.equal((await call(ann, 'GET', `/admin/users/${bob.id}/notes`)).status, 403);
+    assert.equal((await call(null, 'GET', `/admin/users/${bob.id}/notes`)).status, 401);
   });
 
   it('creates users with a role; the new account can sign in; duplicates are 409', async () => {

@@ -32,7 +32,8 @@ const reminderField = z
   .refine((date) => date === null || date.getTime() - Date.now() < MAX_REMINDER_MS, 'Reminder is too far in the future');
 
 /** "true" / "false" query string to boolean. */
-const booleanQuery = z.enum(['true', 'false']).transform((value) => value === 'true');
+/** A "true" / "false" query value as a boolean. */
+export const booleanQuery = z.enum(['true', 'false']).transform((value) => value === 'true');
 
 /** Query for GET /api/notes: pagination plus optional pinned, label and search filters. */
 export const listNotesQuery = z

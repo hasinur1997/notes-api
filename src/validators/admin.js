@@ -6,11 +6,20 @@ import { objectId } from '../middleware/validate.js';
 import { ROLES } from '../models/User.js';
 import { paginationQuery } from '../utils/pagination.js';
 import { emailField, interestsField, nameField, passwordField } from './auth.js';
+import { booleanQuery } from './notes.js';
 
 const roleField = z.enum(ROLES);
 
-/** GET /api/admin/users: a page of users, or the one user with an exact email. */
-export const listUsersQuery = z.object({ ...paginationQuery, email: emailField.optional() }).strict();
+/** GET /api/admin/users: a page of users, optionally only those whose name or email contains `q`. */
+export const listUsersQuery = z.object({ ...paginationQuery, q: z.string().trim().min(1).max(100).optional() }).strict();
+
+/** GET /api/admin/users/:id/notes: that user's notes as they see them, optionally pinned only / unpinned only. */
+export const userNotesQuery = z
+  .object({
+    ...paginationQuery,
+    pinned: booleanQuery.optional(),
+  })
+  .strict();
 
 /** POST /api/admin/users: create an account with any role. */
 export const createUserBody = z

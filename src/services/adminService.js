@@ -7,7 +7,8 @@ import { User } from '../models/User.js';
 import { ApiError } from '../utils/ApiError.js';
 import { deleteImages } from '../utils/imageStorage.js';
 import { buildListResponse, getPagination } from '../utils/pagination.js';
-import { attachPeople } from './noteService.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
+import { attachPeople, buildNotesFilter } from './noteService.js';
 
 /** Fields an admin sees for each user (never the password, tokens or storage ids). */
 const USER_FIELDS = { name: 1, email: 1, role: 1, interests: 1, avatar: 1, createdAt: 1, updatedAt: 1 };
@@ -20,24 +21,46 @@ function toAdminUser({ avatar, ...user }) {
 }
 
 /**
- * A page of users, newest first (uses the _id index; the total comes from collection metadata,
- * so no scan). With `email`, looks up that exact address instead (the unique email index):
- * at most one result, so no sort is needed.
+ * A page of users, newest first, in the order of the _id index. Without `q` the total comes from
+ * collection metadata (no scan). With `q`, users whose name or email contains it (escaped,
+ * case-insensitive) are returned: an approved exception to the index rule, because substring
+ * search cannot use an index and reads every user (see CLAUDE.md).
  *
- * @param {{ page: number, limit: number, email?: string }} query - Validated query.
+ * @param {{ page: number, limit: number, q?: string }} query - Validated query.
  * @returns {Promise<{ data: object[], meta: object }>} Standard list response.
  */
-export async function listUsers({ page, limit, email }) {
-  if (email) {
-    const users = await User.find({ email }, USER_FIELDS).limit(1).lean();
-    return buildListResponse(users.map(toAdminUser), { page: 1, limit, total: users.length });
-  }
+export async function listUsers({ page, limit, q }) {
+  const pattern = q ? new RegExp(escapeRegex(q), 'i') : null;
+  const filter = pattern ? { $or: [{ name: pattern }, { email: pattern }] } : {};
   const { skip } = getPagination({ page, limit });
   const [users, total] = await Promise.all([
-    User.find({}, USER_FIELDS).sort({ _id: -1 }).skip(skip).limit(limit).lean(),
-    User.estimatedDocumentCount(),
+    User.find(filter, USER_FIELDS).sort({ _id: -1 }).skip(skip).limit(limit).lean(),
+    pattern ? User.countDocuments(filter) : User.estimatedDocumentCount(),
   ]);
   return buildListResponse(users.map(toAdminUser), { page, limit, total });
+}
+
+/**
+ * One user's notes exactly as that user sees them (owned + shared with them), newest first,
+ * read-only for the admin. Same filter and indexes as the user's own list (SORT_MERGE over
+ * { owner: 1, _id: -1 } and { collaborators: 1, _id: -1 }).
+ *
+ * @param {import('mongoose').Types.ObjectId} adminId - The admin reading (for `isOwner`, always false here).
+ * @param {string} userId - Validated ObjectId string.
+ * @param {{ page: number, limit: number, pinned?: boolean }} query - Validated query.
+ * @returns {Promise<{ user: object, data: object[], meta: object }>} The user and a standard list.
+ * @throws {ApiError} 404 if there is no such user.
+ */
+export async function listUserNotes(adminId, userId, { page, limit, pinned }) {
+  const user = await User.findById(userId, { _id: 1 }).lean();
+  if (!user) throw ApiError.notFound('User not found');
+  const filter = buildNotesFilter(user._id, { pinned });
+  const { skip } = getPagination({ page, limit });
+  const [notes, total] = await Promise.all([
+    Note.find(filter).sort({ _id: -1 }).skip(skip).limit(limit).lean(),
+    Note.countDocuments(filter),
+  ]);
+  return buildListResponse(await attachPeople(notes, adminId), { page, limit, total });
 }
 
 /**

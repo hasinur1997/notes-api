@@ -89,9 +89,17 @@ const QUERIES = [
     run: () => User.find({}).sort({ _id: -1 }).limit(10).explain('executionStats'),
   },
   {
-    name: 'admin: user by exact email',
-    index: 'email_1',
-    run: () => User.find({ email: 'someone@example.com' }).limit(1).explain('executionStats'),
+    // Approved exception (2026-11-11): substring search on name/email cannot use an index; it
+    // walks the _id index (keeping newest-first order, no in-memory sort) and filters every user.
+    name: 'admin: user search by name or email (approved full read)',
+    index: '_id_',
+    run: () =>
+      User.find({ $or: [{ name: /ahmed/i }, { email: /ahmed/i }] }).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
+    name: "admin: a user's notes as they see them",
+    index: BOTH,
+    run: () => Note.find(buildNotesFilter(someUserId, { pinned: false })).sort({ _id: -1 }).limit(10).explain('executionStats'),
   },
   {
     name: 'admin: all notes (newest first)',
