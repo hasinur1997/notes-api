@@ -79,6 +79,11 @@ describe('notes (integration)', { skip }, () => {
     assert.deepEqual(search.body.data.map((n) => n.title), ['Books']);
     const regexChars = await call(ann, 'GET', `/notes?q=${encodeURIComponent('.*')}`);
     assert.equal(regexChars.body.meta.total, 0);
+    // Every word must match (title or content, any order).
+    const words = await call(ann, 'GET', `/notes?q=${encodeURIComponent('architecture books')}`);
+    assert.deepEqual(words.body.data.map((n) => n.title), ['Books']);
+    const missingWord = await call(ann, 'GET', `/notes?q=${encodeURIComponent('books weekend')}`);
+    assert.equal(missingWord.body.meta.total, 0);
   });
 
   it('returns the sidebar summary in one call', async () => {

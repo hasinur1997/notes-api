@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import mongoose from 'mongoose';
 import { Note, normalizeLabels } from '../../src/models/Note.js';
-import { accessibleBy, buildNotesFilter, mergeLabels } from '../../src/services/noteService.js';
+import { accessibleBy, buildNotesFilter, MAX_SEARCH_WORDS, mergeLabels, searchWords } from '../../src/services/noteService.js';
 import { escapeRegex } from '../../src/utils/escapeRegex.js';
 import {
   addCollaboratorBody,
@@ -104,6 +104,20 @@ describe('accessibleBy / buildNotesFilter', () => {
     }
     assert.equal(branches[0].owner, ownerId);
     assert.equal(branches[1].collaborators, ownerId);
+  });
+
+  it('requires every search word in the title or content, each escaped', () => {
+    const { $or: branches } = buildNotesFilter(ownerId, { q: 'oop  stu(dent' });
+    for (const branch of branches) {
+      assert.equal(branch.$and.length, 2);
+      assert.equal(branch.$and[0].$or[0].title.source, 'oop');
+      assert.equal(branch.$and[1].$or[1].content.source, 'stu\\(dent');
+    }
+  });
+
+  it('splits searches into distinct words, capped', () => {
+    assert.deepEqual(searchWords('  Project  notes project NOTES  '), ['Project', 'notes']);
+    assert.equal(searchWords(Array.from({ length: 20 }, (_, i) => `w${i}`).join(' ')).length, MAX_SEARCH_WORDS);
   });
 });
 

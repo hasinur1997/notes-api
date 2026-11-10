@@ -120,7 +120,7 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | PATCH | `/api/users/me` | Auth — only `name`, `interests` |
 | PATCH | `/api/users/me/settings` | Auth — any of `notesPagination`, `notesPerPage`; returns `{ user }` |
 | POST, DELETE | `/api/users/me/avatar` | Auth — multipart `image` (same checks as note images); replacing or removing deletes the old file |
-| GET, POST | `/api/notes` | Auth — GET filters: `?pinned=true\|false`, `?label=`, `?q=` (search title/content) |
+| GET, POST | `/api/notes` | Auth — GET filters: `?pinned=true\|false`, `?label=`, `?q=` (every word must appear in the title or content, any order; max 8 words) |
 | GET | `/api/notes/summary` | Auth — `{ totalNotes, labels: [{ name, count }] }` in one aggregate |
 | POST | `/api/notes/labels` | Auth — create a label no note uses yet (`{ name }`, stored on the user; 409 if it exists ignoring case) |
 | PATCH, DELETE | `/api/notes/labels/:name` | Auth — rename (`{ name }`) or remove a label on all visible notes and in the user's created labels |

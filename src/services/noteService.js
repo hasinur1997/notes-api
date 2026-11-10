@@ -35,22 +35,45 @@ export function accessibleBy(userId, conditions = {}) {
   return { $or: [{ owner: userId, ...conditions }, { collaborators: userId, ...conditions }] };
 }
 
+/** Most words a search uses; anything after is ignored (keeps the query small). */
+export const MAX_SEARCH_WORDS = 8;
+
+/**
+ * Splits a search into distinct words (case-insensitive), in order, at most MAX_SEARCH_WORDS.
+ *
+ * @param {string} q - Validated search text.
+ * @returns {string[]} Words to match.
+ */
+export function searchWords(q) {
+  const seen = new Set();
+  return q
+    .split(/\s+/)
+    .filter((word) => word && !seen.has(word.toLowerCase()) && seen.add(word.toLowerCase()))
+    .slice(0, MAX_SEARCH_WORDS);
+}
+
+/** Condition matching one word in the title or the content (escaped, case-insensitive). */
+function wordCondition(word) {
+  const pattern = new RegExp(escapeRegex(word), 'i');
+  return { $or: [{ title: pattern }, { content: pattern }] };
+}
+
 /**
  * Builds the list filter for the notes a user can see.
  *
  * @param {import('mongoose').Types.ObjectId} userId - The requesting user.
  * @param {{ pinned?: boolean, label?: string, q?: string, reminder?: boolean }} filters - Optional filters.
- * @returns {object} MongoDB filter. The search term is regex-escaped and matched case-insensitively.
+ * @returns {object} MongoDB filter. Every search word must appear in the title or the content, in
+ *   any order (each regex-escaped, case-insensitive).
  */
 export function buildNotesFilter(userId, { pinned, label, q, reminder } = {}) {
   const conditions = {};
   if (pinned !== undefined) conditions.pinned = pinned;
   if (label) conditions.labels = label;
   if (reminder) conditions.reminderAt = { $ne: null };
-  if (q) {
-    const pattern = new RegExp(escapeRegex(q), 'i');
-    conditions.$or = [{ title: pattern }, { content: pattern }];
-  }
+  const words = q ? searchWords(q) : [];
+  if (words.length === 1) Object.assign(conditions, wordCondition(words[0]));
+  if (words.length > 1) conditions.$and = words.map(wordCondition);
   return accessibleBy(userId, conditions);
 }
 

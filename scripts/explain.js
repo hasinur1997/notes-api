@@ -52,6 +52,12 @@ const QUERIES = [
       Note.find(buildNotesFilter(someUserId, { q: 'index' })).sort({ _id: -1 }).limit(10).explain('executionStats'),
   },
   {
+    name: 'notes list: multi-word search',
+    index: BOTH,
+    run: () =>
+      Note.find(buildNotesFilter(someUserId, { q: 'index strategy' })).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
     name: 'note by id, owner or collaborator (get / update)',
     index: ['_id_', 'owner_1__id_-1', 'collaborators_1__id_-1'],
     run: () => Note.findOne({ _id: someNoteId, ...accessibleBy(someUserId) }).explain('executionStats'),
