@@ -46,11 +46,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install SSH tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rsync openssh-client
-
       - name: Configure SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_KEY }}
@@ -112,18 +107,35 @@ jobs:
           CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
           CPANEL_PORT: ${{ secrets.CPANEL_PORT }}
           CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
+        # The server has no rsync, so files are sent as a tar archive over SSH.
+        # Only git-tracked files are shipped, so .env, node_modules, uploads/ and tmp/ on the server are
+        # never touched. .deploy-manifest lists what the last deploy shipped; files that were in it but
+        # are no longer tracked are removed from the server (like rsync --delete, limited to our own files).
         run: |
-          rsync -az --delete \
-            --exclude='.git/' \
-            --exclude='.github/' \
-            --exclude='node_modules/' \
-            --exclude='.env' \
-            --exclude='.env.*' \
-            --exclude='!.env.example' \
-            --exclude='tmp/' \
-            --exclude='coverage/' \
-            -e "ssh -i ~/.ssh/notes_api_deploy -p $CPANEL_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes" \
-            ./ "$CPANEL_USERNAME@$CPANEL_HOST:$DEPLOY_PATH/"
+          set -euo pipefail
+          SSH=(ssh -i ~/.ssh/notes_api_deploy -p "$CPANEL_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes
+               "$CPANEL_USERNAME@$CPANEL_HOST")
+
+          git ls-files | grep -v '^\.github/' > .deploy-manifest.new
+          tar -czf "$RUNNER_TEMP/release.tgz" -T .deploy-manifest.new .deploy-manifest.new
+
+          "${SSH[@]}" "cat > '$DEPLOY_PATH/tmp/release.tgz'" < "$RUNNER_TEMP/release.tgz"
+
+          "${SSH[@]}" "sh -s -- '$DEPLOY_PATH'" <<'REMOTE'
+          set -e
+          cd "$1"
+          tar -xzf tmp/release.tgz
+          rm -f tmp/release.tgz
+          if [ -f .deploy-manifest ]; then
+            LC_ALL=C sort .deploy-manifest > tmp/old.list
+            LC_ALL=C sort .deploy-manifest.new > tmp/new.list
+            LC_ALL=C comm -23 tmp/old.list tmp/new.list | while IFS= read -r file; do
+              rm -f -- "./$file"
+            done
+            rm -f tmp/old.list tmp/new.list
+          fi
+          mv .deploy-manifest.new .deploy-manifest
+          REMOTE
 
       # The new .env is checked with src/config/env.js (values from --env-file win over the old .env)
       # before it goes live, so a missing or invalid value fails the deploy instead of the running app.
