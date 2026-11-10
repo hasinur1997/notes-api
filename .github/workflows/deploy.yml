@@ -121,7 +121,7 @@ jobs:
 
           "${SSH[@]}" "cat > '$DEPLOY_PATH/tmp/release.tgz'" < "$RUNNER_TEMP/release.tgz"
 
-          "${SSH[@]}" "sh -s -- '$DEPLOY_PATH'" <<'REMOTE'
+          "${SSH[@]}" "bash -s -- '$DEPLOY_PATH'" <<'REMOTE'
           set -e
           cd "$1"
           tar -xzf tmp/release.tgz
@@ -137,6 +137,11 @@ jobs:
           mv .deploy-manifest.new .deploy-manifest
           REMOTE
 
+      # Over SSH, cPanel has no node/npm on PATH: each app created in "Setup Node.js App" gets its own
+      # virtual environment at ~/nodevenv/<app path relative to home>/<node version>/bin/activate.
+      # The newest version found for DEPLOY_PATH is activated.
+      # `npm install` is used instead of `npm ci` because CloudLinux makes node_modules a symlink into
+      # that environment, and `npm ci` would delete it.
       # The new .env is checked with src/config/env.js (values from --env-file win over the old .env)
       # before it goes live, so a missing or invalid value fails the deploy instead of the running app.
       - name: Install production dependencies, apply .env and restart Passenger
@@ -150,10 +155,25 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$CPANEL_USERNAME@$CPANEL_HOST" \
-            "cd '$DEPLOY_PATH' \
-              && npm ci --omit=dev \
-              && node --env-file=.env.next --input-type=module -e \"await import('./src/config/env.js')\" \
-              && mv .env.next .env \
-              && chmod 600 .env \
-              && mkdir -p tmp \
-              && touch tmp/restart.txt"
+            "bash -s -- '$DEPLOY_PATH'" <<'REMOTE'
+          set -e
+          app_dir="${1%/}"
+          app_rel="${app_dir#"$HOME"/}"
+          activate=$(ls -d "$HOME/nodevenv/$app_rel"/*/bin/activate 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$activate" ]; then
+            echo "No Node.js environment found at ~/nodevenv/$app_rel." >&2
+            echo "Create the app first in cPanel -> Setup Node.js App with Application root '$app_rel'." >&2
+            exit 1
+          fi
+          echo "Using $activate"
+          . "$activate"
+          cd "$app_dir"
+          node --version
+          npm install --omit=dev --no-audit --no-fund
+          node --env-file=.env.next --input-type=module -e "await import('./src/config/env.js')"
+          mv .env.next .env
+          chmod 600 .env
+          mkdir -p tmp
+          touch tmp/restart.txt
+          echo "Deployed and restarted."
+          REMOTE
