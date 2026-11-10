@@ -1,18 +1,14 @@
 /**
  * Notes API against a real MongoDB. Skipped unless TEST_MONGO_URI is set.
- * The database name must contain "test"; it is dropped after the run.
+ * Uses its own database (TEST_MONGO_URI name + "_notes"), which must contain "test" and is dropped after the run.
  */
 import '../helpers/setup.js';
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import mongoose from 'mongoose';
-import { connectDB, disconnectDB } from '../../src/config/db.js';
 import { Note } from '../../src/models/Note.js';
 import { User } from '../../src/models/User.js';
+import { connectTestDb, dropTestDb, skipWithoutDb as skip } from '../helpers/db.js';
 import { request, startServer } from '../helpers/http.js';
-
-const TEST_MONGO_URI = process.env.TEST_MONGO_URI;
-const skip = TEST_MONGO_URI ? false : 'set TEST_MONGO_URI to run database tests';
 
 describe('notes (integration)', { skip }, () => {
   let api;
@@ -20,12 +16,7 @@ describe('notes (integration)', { skip }, () => {
   let bob;
 
   before(async () => {
-    await connectDB(TEST_MONGO_URI);
-    if (!/test/i.test(mongoose.connection.name)) {
-      await disconnectDB();
-      throw new Error(`Refusing to run against "${mongoose.connection.name}": database name must contain "test"`);
-    }
-    await Promise.all([User.syncIndexes(), Note.syncIndexes()]);
+    await connectTestDb('notes', [User, Note]);
     api = await startServer();
   });
 
@@ -45,10 +36,7 @@ describe('notes (integration)', { skip }, () => {
 
   after(async () => {
     await api?.close();
-    if (mongoose.connection.readyState === 1 && /test/i.test(mongoose.connection.name)) {
-      await mongoose.connection.dropDatabase();
-    }
-    await disconnectDB();
+    await dropTestDb();
   });
 
   const call = (user, method, path, body) => request(`${api.baseUrl}${path}`, { method, body, token: user?.token });

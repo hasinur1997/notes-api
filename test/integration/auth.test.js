@@ -1,19 +1,15 @@
 /**
  * Auth flow against a real MongoDB. Skipped unless TEST_MONGO_URI is set.
- * The database name must contain "test"; it is dropped after the run.
+ * Uses its own database (TEST_MONGO_URI name + "_auth"), which must contain "test" and is dropped after the run.
  *
  *   TEST_MONGO_URI=mongodb://127.0.0.1:27017/notes_test npm test
  */
 import '../helpers/setup.js';
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import mongoose from 'mongoose';
-import { connectDB, disconnectDB } from '../../src/config/db.js';
 import { User } from '../../src/models/User.js';
+import { connectTestDb, dropTestDb, skipWithoutDb as skip } from '../helpers/db.js';
 import { request, startServer } from '../helpers/http.js';
-
-const TEST_MONGO_URI = process.env.TEST_MONGO_URI;
-const skip = TEST_MONGO_URI ? false : 'set TEST_MONGO_URI to run database tests';
 
 const ann = { name: 'Ann', email: 'ann@example.com', password: 'correct-horse', interests: ['Music', 'music'] };
 
@@ -21,12 +17,7 @@ describe('auth (integration)', { skip }, () => {
   let api;
 
   before(async () => {
-    await connectDB(TEST_MONGO_URI);
-    if (!/test/i.test(mongoose.connection.name)) {
-      await disconnectDB();
-      throw new Error(`Refusing to run against "${mongoose.connection.name}": database name must contain "test"`);
-    }
-    await User.syncIndexes(); // the unique email index is required for the 409 test
+    await connectTestDb('auth', [User]);
     api = await startServer();
   });
 
@@ -36,10 +27,7 @@ describe('auth (integration)', { skip }, () => {
 
   after(async () => {
     await api?.close();
-    if (mongoose.connection.readyState === 1 && /test/i.test(mongoose.connection.name)) {
-      await mongoose.connection.dropDatabase();
-    }
-    await disconnectDB();
+    await dropTestDb();
   });
 
   const register = (body) => request(`${api.baseUrl}/auth/register`, { method: 'POST', body });
