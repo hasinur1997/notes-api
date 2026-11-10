@@ -1,11 +1,10 @@
 /**
- * Multipart upload handling for note images. Files are kept in memory (never written to disk)
- * and streamed to image storage by the controller.
+ * Multipart upload handling for note images. Files are kept in memory and only written
+ * (to Cloudinary or the uploads folder) after their bytes are verified as an image.
  */
 import multer from 'multer';
 import { rateLimit } from 'express-rate-limit';
 import { ApiError } from '../utils/ApiError.js';
-import { isImageStorageConfigured } from '../utils/imageStorage.js';
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
@@ -13,8 +12,8 @@ const UPLOAD_WINDOW_MS = 15 * 60 * 1000;
 const UPLOADS_PER_WINDOW = 30;
 
 /**
- * Accepts one file in the `image` field: JPEG, PNG, WebP or GIF, at most 5 MB.
- * Rejected files never reach the controller.
+ * Accepts one file in the `image` field, at most 5 MB, with a JPEG, PNG, WebP or GIF MIME type.
+ * This is only a quick pre-check: the storage layer verifies the actual bytes (utils/imageInfo.js).
  *
  * @type {import('express').RequestHandler}
  */
@@ -40,17 +39,3 @@ export const uploadLimiter = rateLimit({
   handler: (req, res, next) => next(ApiError.tooManyRequests('Too many uploads, please try again later', 'RATE_LIMITED')),
 });
 
-/**
- * Answers 503 before the upload is read when image storage is not configured.
- *
- * @param {import('express').Request} req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
- * @returns {void}
- */
-export function requireImageStorage(req, res, next) {
-  if (!isImageStorageConfigured()) {
-    return next(new ApiError(503, 'Image uploads are not configured on the server', 'UPLOADS_DISABLED'));
-  }
-  return next();
-}

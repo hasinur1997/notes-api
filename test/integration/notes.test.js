@@ -9,6 +9,7 @@ import { Note } from '../../src/models/Note.js';
 import { User } from '../../src/models/User.js';
 import { connectTestDb, dropTestDb, skipWithoutDb as skip } from '../helpers/db.js';
 import { request, startServer } from '../helpers/http.js';
+import { JPEG_3X2, PNG_1X1 } from '../helpers/images.js';
 
 describe('notes (integration)', { skip }, () => {
   let api;
@@ -222,17 +223,77 @@ describe('notes (integration)', { skip }, () => {
     });
   });
 
-  it('image upload answers 503 while storage is not configured', async () => {
-    const { body } = await create(ann, { title: 'With image' });
-    const form = new FormData();
-    form.append('image', new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), 'a.png');
-    const res = await fetch(`${api.baseUrl}/notes/${body.note._id}/images`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${ann.token}` },
-      body: form,
+  describe('images (local storage)', () => {
+    /** Uploads raw bytes as the `image` field. */
+    async function upload(user, noteId, bytes, type = 'image/png', name = 'photo.png') {
+      const form = new FormData();
+      form.append('image', new Blob([bytes], { type }), name);
+      const res = await fetch(`${api.baseUrl}/notes/${noteId}/images`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${user.token}` },
+        body: form,
+      });
+      return { status: res.status, body: await res.json() };
+    }
+
+    it('stores a real image, serves it safely, and deletes the file with the image', async () => {
+      const { body } = await create(ann, { title: 'With image' });
+      const res = await upload(ann, body.note._id, PNG_1X1);
+      assert.equal(res.status, 201);
+      const [image] = res.body.note.images;
+      assert.match(image.url, /^\/uploads\/notes\/[0-9a-f]{24}\/[0-9a-f]{32}\.png$/);
+      assert.deepEqual([image.width, image.height], [1, 1]);
+      assert.equal('publicId' in image, true);
+
+      const origin = api.baseUrl.replace(/\/api$/, '');
+      const file = await fetch(`${origin}${image.url}`);
+      assert.equal(file.status, 200);
+      assert.equal(file.headers.get('content-type'), 'image/png');
+      assert.equal(file.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(file.headers.get('cross-origin-resource-policy'), 'cross-origin');
+      assert.deepEqual(Buffer.from(await file.arrayBuffer()), PNG_1X1);
+
+      const removed = await call(ann, 'DELETE', `/notes/${body.note._id}/images/${image._id}`);
+      assert.deepEqual(removed.body.note.images, []);
+      assert.equal((await fetch(`${origin}${image.url}`)).status, 404);
     });
-    assert.equal(res.status, 503);
-    assert.equal((await res.json()).error.code, 'UPLOADS_DISABLED');
+
+    it('names the file by its real type, not the name or MIME type the client sent', async () => {
+      const { body } = await create(ann, { title: 'Disguised' });
+      const res = await upload(ann, body.note._id, JPEG_3X2, 'image/png', 'trick.png');
+      assert.equal(res.status, 201);
+      assert.match(res.body.note.images[0].url, /\.jpg$/);
+    });
+
+    it('rejects non-images even with an image MIME type, and wrong MIME types up front', async () => {
+      const { body } = await create(ann, { title: 'Bad files' });
+      const fake = await upload(ann, body.note._id, Buffer.from('<svg onload="alert(1)"/>'), 'image/png');
+      assert.equal(fake.status, 400);
+      assert.equal(fake.body.error.code, 'INVALID_IMAGE');
+      const svg = await upload(ann, body.note._id, Buffer.from('<svg/>'), 'image/svg+xml', 'a.svg');
+      assert.equal(svg.status, 400);
+    });
+
+    it('rejects files over 5 MB with 413', async () => {
+      const { body } = await create(ann, { title: 'Too big' });
+      const big = Buffer.concat([PNG_1X1, Buffer.alloc(5 * 1024 * 1024)]);
+      assert.equal((await upload(ann, body.note._id, big)).status, 413);
+    });
+
+    it('enforces 5 images per note and access rules', async () => {
+      const { body } = await create(ann, { title: 'Album' });
+      for (let i = 0; i < 5; i++) assert.equal((await upload(ann, body.note._id, PNG_1X1)).status, 201);
+      assert.equal((await upload(ann, body.note._id, PNG_1X1)).status, 400);
+      assert.equal((await upload(bob, body.note._id, PNG_1X1)).status, 404);
+    });
+
+    it('deleting a note deletes its image files', async () => {
+      const { body } = await create(ann, { title: 'Gone' });
+      const { body: uploaded } = await upload(ann, body.note._id, PNG_1X1);
+      const origin = api.baseUrl.replace(/\/api$/, '');
+      await call(ann, 'DELETE', `/notes/${body.note._id}`);
+      assert.equal((await fetch(`${origin}${uploaded.note.images[0].url}`)).status, 404);
+    });
   });
 
   it('reads notes created before colour, reminders, sharing and images existed', async () => {

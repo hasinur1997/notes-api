@@ -124,7 +124,7 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | POST | `/api/notes/:id/copy` | Owner or collaborator — copy becomes the caller's own note |
 | POST | `/api/notes/:id/collaborators` | Owner only — `{ email }` of a registered user |
 | DELETE | `/api/notes/:id/collaborators/:userId` | Owner, or the collaborator leaving |
-| POST, DELETE | `/api/notes/:id/images[/:imageId]` | Owner or collaborator — multipart `image`, JPEG/PNG/WebP/GIF ≤ 5 MB, rate-limited; 503 without Cloudinary config |
+| POST, DELETE | `/api/notes/:id/images[/:imageId]` | Owner or collaborator — multipart `image`, JPEG/PNG/WebP/GIF ≤ 5 MB (verified from the file's bytes), rate-limited. Stored on Cloudinary when configured, otherwise on this server in `UPLOAD_DIR` and served at `/uploads/...` |
 | GET, POST | `/api/admin/users` | Admin |
 | GET, PATCH, DELETE | `/api/admin/users/:id` | Admin |
 | GET | `/api/admin/notes?owner=` | Admin |
@@ -155,7 +155,7 @@ The frontend (`notes-web`) depends on these shapes. Do not change them.
 | 403 | Non-admin on admin route; admin deleting/demoting themselves |
 | 404 | Not found **or not accessible** (never reveal that another user's note exists) |
 | 413 | JSON body over 100kb, or image over 5 MB |
-| 503 | Image uploads requested while Cloudinary is not configured |
+| 502 | Cloudinary failed to store an image |
 | 409 | Duplicate email (catch Mongo error code `11000`) |
 | 429 | Login rate limit |
 
@@ -208,10 +208,11 @@ ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=
 # Optional: enables database tests in `npm test`. The database name must contain "test"; it is dropped after the run.
 TEST_MONGO_URI=
-# Optional: image uploads. Without them, image endpoints return 503.
+# Optional: store images on Cloudinary. Without them, images are stored on this server.
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
+UPLOAD_DIR=                # default ./uploads (local image storage; git-ignored)
 ```
 
 ---

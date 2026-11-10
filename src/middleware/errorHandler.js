@@ -72,6 +72,13 @@ export function toApiError(err) {
     return new ApiError(413, 'Request body is too large', 'PAYLOAD_TOO_LARGE');
   }
 
+  // Other client errors raised by Express internals (e.g. a missing file under /uploads) carry a
+  // 4xx status; keep the status but never expose their internal messages or file paths.
+  const status = err?.status ?? err?.statusCode;
+  if (Number.isInteger(status) && status >= 400 && status < 500) {
+    return status === 404 ? ApiError.notFound() : new ApiError(status, 'Request not allowed', 'REQUEST_REJECTED');
+  }
+
   return null;
 }
 
