@@ -6,6 +6,8 @@ import { deleteImages, uploadImage } from '../utils/imageStorage.js';
 
 /** Profile fields a user may change themselves. Everything else (email, role, password) is fixed here. */
 const EDITABLE_PROFILE_FIELDS = ['name', 'interests'];
+/** Settings a user may change (all of them; listed so nothing else can be written). */
+const EDITABLE_SETTINGS = ['notesPagination', 'notesPerPage'];
 
 /**
  * PATCH /api/users/me: updates the signed-in user's own name and/or interests.
@@ -19,6 +21,22 @@ const EDITABLE_PROFILE_FIELDS = ['name', 'interests'];
 export async function updateMe(req, res) {
   for (const field of EDITABLE_PROFILE_FIELDS) {
     if (req.body[field] !== undefined) req.user[field] = req.body[field];
+  }
+  await req.user.save();
+  res.json({ user: req.user });
+}
+
+/**
+ * PATCH /api/users/me/settings: updates any of the signed-in user's settings. Only the listed
+ * keys are copied (the body is already validated), then saved with save() so enums run again.
+ *
+ * @param {import('express').Request} req - Body: { notesPagination?, notesPerPage? }.
+ * @param {import('express').Response} res - 200 `{ user }`.
+ * @returns {Promise<void>}
+ */
+export async function updateSettings(req, res) {
+  for (const key of EDITABLE_SETTINGS) {
+    if (req.body[key] !== undefined) req.user.settings[key] = req.body[key];
   }
   await req.user.save();
   res.json({ user: req.user });

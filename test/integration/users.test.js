@@ -78,3 +78,60 @@ describe('PATCH /api/users/me (integration)', { skip }, () => {
     assert.equal((await patch({ name: 'X' }, null)).status, 401);
   });
 });
+
+describe('PATCH /api/users/me/settings (integration)', { skip }, () => {
+  let api;
+  let token;
+
+  before(async () => {
+    await connectTestDb('settings', [User]);
+    api = await startServer();
+  });
+
+  beforeEach(async () => {
+    await User.deleteMany({});
+    const res = await request(`${api.baseUrl}/auth/register`, {
+      method: 'POST',
+      body: { name: 'Ann', email: 'ann@example.com', password: 'correct-horse' },
+    });
+    token = res.body.token;
+  });
+
+  after(async () => {
+    await api?.close();
+    await dropTestDb();
+  });
+
+  const patch = (body, auth = token) => request(`${api.baseUrl}/users/me/settings`, { method: 'PATCH', body, token: auth });
+
+  it('returns default settings for new accounts', async () => {
+    const me = await request(`${api.baseUrl}/auth/me`, { token });
+    assert.deepEqual(me.body.user.settings, { notesPagination: 'pages', notesPerPage: 12 });
+  });
+
+  it('fills defaults for accounts stored before settings existed', async () => {
+    await User.collection.updateOne({ email: 'ann@example.com' }, { $unset: { settings: '' } });
+    const me = await request(`${api.baseUrl}/auth/me`, { token });
+    assert.deepEqual(me.body.user.settings, { notesPagination: 'pages', notesPerPage: 12 });
+  });
+
+  it('updates one setting without touching the other, and persists it', async () => {
+    const res = await patch({ notesPagination: 'infinite' });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.user.settings, { notesPagination: 'infinite', notesPerPage: 12 });
+    await patch({ notesPerPage: 48 });
+    const me = await request(`${api.baseUrl}/auth/me`, { token });
+    assert.deepEqual(me.body.user.settings, { notesPagination: 'infinite', notesPerPage: 48 });
+  });
+
+  it('rejects unknown keys, invalid values and an empty body', async () => {
+    for (const body of [{}, { notesPagination: 'endless' }, { notesPerPage: 13 }, { notesPerPage: '12' }, { role: 'admin' }, { notesPerPage: 12, theme: 'dark' }]) {
+      assert.equal((await patch(body)).status, 400, JSON.stringify(body));
+    }
+    assert.equal((await User.findOne({ email: 'ann@example.com' }).lean()).role, 'user');
+  });
+
+  it('requires authentication', async () => {
+    assert.equal((await patch({ notesPerPage: 24 }, null)).status, 401);
+  });
+});

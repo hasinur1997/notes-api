@@ -10,6 +10,11 @@ export const ROLES = Object.freeze(['user', 'admin']);
 
 const BCRYPT_COST = 12;
 
+/** How the notes list is paged: numbered pages, or loading more while scrolling. */
+export const NOTES_PAGINATION = Object.freeze(['pages', 'infinite']);
+/** Notes loaded per page (or per scroll batch); multiples of 12 fill 2, 3, 4 or 6 columns. */
+export const NOTES_PER_PAGE = Object.freeze([12, 24, 48]);
+
 /**
  * Normalizes an interests list: trims, lowercases, drops empty values and duplicates.
  * Used as the schema setter, so every write path stores interests the same way.
@@ -37,6 +42,12 @@ const userSchema = new mongoose.Schema(
         { _id: false },
       ),
       default: null,
+    },
+    // App preferences, changed on the Settings page. Mongoose fills the defaults for accounts
+    // created before settings existed, so every user always has a complete object.
+    settings: {
+      notesPagination: { type: String, enum: NOTES_PAGINATION, default: 'pages' },
+      notesPerPage: { type: Number, enum: NOTES_PER_PAGE, default: 12 },
     },
     // Password reset: only a SHA-256 hash of the emailed token is stored, never the token itself.
     resetPasswordTokenHash: { type: String, select: false },
