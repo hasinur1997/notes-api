@@ -49,6 +49,16 @@ describe('app', () => {
     assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
   });
 
+  it('allows every method the API uses in CORS preflight requests', async () => {
+    for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+      const res = await request(`${api.baseUrl}/notes`, {
+        method: 'OPTIONS',
+        headers: { origin: 'http://localhost:3000', 'access-control-request-method': method },
+      });
+      assert.match(res.headers.get('access-control-allow-methods') ?? '', new RegExp(`\\b${method}\\b`), method);
+    }
+  });
+
   it('allows the configured CORS origin only', async () => {
     const allowed = await request(`${api.baseUrl}/health`, { headers: { origin: 'http://localhost:3000' } });
     const denied = await request(`${api.baseUrl}/health`, { headers: { origin: 'https://evil.example' } });
