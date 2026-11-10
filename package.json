@@ -10,7 +10,8 @@
   },
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

@@ -1,3 +1,6 @@
+/**
+ * /api/auth routes: register, login (rate-limited) and current user.
+ */
 import { Router } from 'express';
 import { login, me, register } from '../controllers/authController.js';
 import { auth } from '../middleware/auth.js';

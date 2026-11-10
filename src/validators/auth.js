@@ -1,13 +1,21 @@
+/**
+ * Zod schemas for the auth endpoints, plus field rules shared with user and admin validators.
+ */
 import { z } from 'zod';
 
-// Shared field rules, reused by user and admin validators.
+/** Display name: trimmed, 1–100 characters. */
 export const nameField = z.string().trim().min(1, 'Name is required').max(100);
-// Trim and lowercase first, then validate the format.
+
+/** Email: trimmed and lowercased first, then format-checked. */
 export const emailField = z.string().trim().toLowerCase().max(254).pipe(z.email('Invalid email'));
-// bcrypt only uses the first 72 bytes of a password.
+
+/** Password: 8–72 characters (bcrypt only uses the first 72 bytes). */
 export const passwordField = z.string().min(8, 'Password must be at least 8 characters').max(72);
+
+/** Interests: up to 20 entries of 1–50 characters. The model normalizes case and duplicates. */
 export const interestsField = z.array(z.string().trim().min(1).max(50)).max(20);
 
+/** Body for POST /api/auth/register. `role` is deliberately not accepted. */
 export const registerBody = z
   .object({
     name: nameField,
@@ -17,6 +25,7 @@ export const registerBody = z
   })
   .strict();
 
+/** Body for POST /api/auth/login. Password strength is not checked here, only presence. */
 export const loginBody = z
   .object({
     email: emailField,

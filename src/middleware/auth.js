@@ -1,3 +1,6 @@
+/**
+ * Authentication middleware.
+ */
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { User } from '../models/User.js';
@@ -5,13 +8,31 @@ import { ApiError } from '../utils/ApiError.js';
 import { verifyToken } from '../utils/token.js';
 
 /**
- * Requires a valid `Authorization: Bearer <jwt>` header.
- * Loads the user from the database on every request, so deleted users and role
- * changes take effect immediately (the role in the token is never trusted).
+ * Extracts the token from an `Authorization: Bearer <jwt>` header.
+ *
+ * @param {string | undefined} header - Raw Authorization header value.
+ * @returns {string | null} The token, or null if the header is missing or not a Bearer header.
+ */
+export function getBearerToken(header) {
+  const [scheme, token] = (header ?? '').split(' ');
+  return scheme === 'Bearer' && token ? token : null;
+}
+
+/**
+ * Requires a valid access token and attaches the current user as `req.user`.
+ * The user is loaded from the database on every request (by `_id`, which is always indexed),
+ * so deleted users and role changes take effect immediately: the role in the token is never trusted.
+ * `req.user` is a full document (not lean) so its `toJSON` transform hides the password if it is returned.
+ *
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ * @returns {Promise<void>}
+ * @throws {ApiError} 401 with code NO_TOKEN, TOKEN_EXPIRED, INVALID_TOKEN or USER_NOT_FOUND.
  */
 export async function auth(req, res, next) {
-  const [scheme, token] = (req.get('authorization') ?? '').split(' ');
-  if (scheme !== 'Bearer' || !token) {
+  const token = getBearerToken(req.get('authorization'));
+  if (!token) {
     throw ApiError.unauthorized('Authentication required', 'NO_TOKEN');
   }
 

@@ -76,6 +76,7 @@ npm run seed           # creates admin from env + optional fake data
 npm run seed -- --fake # adds ~1000 users, ~5000 notes, ~2000 posts for index testing
 npm run sync-indexes   # Model.syncIndexes() on all models, prints getIndexes()
 npm run explain        # runs explain("executionStats") on every query in the index map
+npm test               # unit tests; database tests also run when TEST_MONGO_URI is set
 ```
 
 ### 3.2 Structure
@@ -93,6 +94,7 @@ src/
 ├── app.js         express app (middleware + routes)
 └── server.js      connects DB, starts server
 scripts/           seed.js, sync-indexes.js, explain.js
+test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TEST_MONGO_URI)
 ```
 
 ### 3.3 Data Model
@@ -192,6 +194,8 @@ CORS_ORIGIN=http://localhost:3000
 ADMIN_NAME=Admin
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=
+# Optional: enables database tests in `npm test`. The database name must contain "test"; it is dropped after the run.
+TEST_MONGO_URI=
 ```
 
 ---

@@ -1,9 +1,15 @@
+/**
+ * Express application: security middleware, body parsing, routes and error handling.
+ * Exported without calling `listen()` so tests can mount it on an ephemeral port.
+ */
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { env } from './config/env.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import apiRoutes from './routes/index.js';
+
+const JSON_BODY_LIMIT = '100kb';
 
 const app = express();
 
@@ -19,7 +25,7 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization'],
   }),
 );
-app.use(express.json({ limit: '100kb' }));
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 app.use('/api', apiRoutes);
 

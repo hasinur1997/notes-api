@@ -1,10 +1,21 @@
+/**
+ * User model: accounts, credentials, roles and interests.
+ */
 import bcrypt from 'bcrypt';
 import mongoose from 'mongoose';
 
+/** Allowed user roles. New accounts are always `user`. */
 export const ROLES = Object.freeze(['user', 'admin']);
+
 const BCRYPT_COST = 12;
 
-// Lowercase, trim, drop empties and duplicates.
+/**
+ * Normalizes an interests list: trims, lowercases, drops empty values and duplicates.
+ * Used as the schema setter, so every write path stores interests the same way.
+ *
+ * @param {unknown[]} [values=[]] - Raw interest values.
+ * @returns {string[]} Clean, unique interests in their original order.
+ */
 export function normalizeInterests(values = []) {
   return [...new Set(values.map((v) => String(v).trim().toLowerCase()).filter(Boolean))];
 }
@@ -21,6 +32,7 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
     toJSON: {
       versionKey: false,
+      // Defence in depth: never serialize the password, even if it was explicitly selected.
       transform: (doc, ret) => {
         delete ret.password;
         return ret;
@@ -33,13 +45,22 @@ const userSchema = new mongoose.Schema(
 userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ interests: 1 });
 
+/** Hashes the password with bcrypt whenever it is new or changed. */
 userSchema.pre('save', async function hashPassword() {
   if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, BCRYPT_COST);
 });
 
+/**
+ * Checks a plain-text password against the stored hash.
+ * The document must have been loaded with `.select('+password')`.
+ *
+ * @param {string} candidate - Plain-text password to check.
+ * @returns {Promise<boolean>} True if it matches.
+ */
 userSchema.methods.comparePassword = function comparePassword(candidate) {
   return bcrypt.compare(candidate, this.password);
 };
 
+/** Mongoose model for the `users` collection. */
 export const User = mongoose.model('User', userSchema);

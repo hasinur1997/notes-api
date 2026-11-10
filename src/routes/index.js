@@ -1,3 +1,6 @@
+/**
+ * API router: mounts every resource router under /api.
+ */
 import { Router } from 'express';
 import authRoutes from './auth.js';
 import healthRoutes from './health.js';
