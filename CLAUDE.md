@@ -53,6 +53,7 @@
    | posts | `{ author: 1, _id: -1 }` | — |
 
 3. **Every list endpoint sorts by `{ _id: -1 }`.** Never sort by `createdAt` (there is no index for it, on purpose).
+   Note filters (`pinned`, `labels`, search regex) are applied on top of the `{ owner: 1, _id: -1 }` index scan; they never get their own index. Search terms are always regex-escaped.
 4. **Every list endpoint is paginated.** Default `limit=10`, max `limit=50`, `page` starts at 1.
 5. **Scenario 1 (group by interests) uses exactly ONE `User.aggregate()` call.** No `find`, `countDocuments`, `populate` or any other DB call in that code path. Pagination happens inside the pipeline with `$facet`.
 6. **Scenario 2 (user's posts) is a single pipeline on `users` with a `$lookup` to `posts`.** No `populate`, no second query.
@@ -102,7 +103,7 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | Collection | Fields |
 |---|---|
 | users | `name`, `email` (lowercase, trimmed), `password` (`select: false`), `role` (`user` \| `admin`, default `user`), `interests` ([String], lowercased, trimmed, deduped), timestamps |
-| notes | `owner` (ObjectId → users, required), `title` (required), `content`, timestamps |
+| notes | `owner` (ObjectId → users, required), `title` (required, max 200), `content` (max 20,000), `labels` ([String], max 10, trimmed, case-insensitive deduped, each max 30), `pinned` (Boolean, default `false`), timestamps |
 | posts | `author` (ObjectId → users, required), `title` (required), `body`, timestamps |
 
 ### 3.4 Endpoints
@@ -113,7 +114,9 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | POST | `/api/auth/login` | Public, rate-limited |
 | GET | `/api/auth/me` | Auth |
 | PATCH | `/api/users/me` | Auth — only `name`, `interests` |
-| GET, POST | `/api/notes` | Auth |
+| GET, POST | `/api/notes` | Auth — GET filters: `?pinned=true\|false`, `?label=`, `?q=` (search title/content) |
+| GET | `/api/notes/summary` | Auth — `{ totalNotes, labels: [{ name, count }] }` in one aggregate |
+| PATCH, DELETE | `/api/notes/labels/:name` | Auth — rename (`{ name }`) or remove a label on all of the caller's notes |
 | GET, PATCH, DELETE | `/api/notes/:id` | Owner (admin may GET) |
 | GET, POST | `/api/admin/users` | Admin |
 | GET, PATCH, DELETE | `/api/admin/users/:id` | Admin |

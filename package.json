@@ -11,7 +11,9 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "sync-indexes": "node scripts/sync-indexes.js",
+    "explain": "node scripts/explain.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

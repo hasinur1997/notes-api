@@ -1,0 +1,120 @@
+/**
+ * Runs explain("executionStats") on every query the API makes and checks the winning plan:
+ * each query must use its intended index (IXSCAN), with no COLLSCAN and no in-memory SORT.
+ * Exits with code 1 if any query fails the check.
+ *
+ *   npm run explain
+ */
+import mongoose from 'mongoose';
+import { connectDB, disconnectDB } from '../src/config/db.js';
+import { Note } from '../src/models/Note.js';
+import { User } from '../src/models/User.js';
+import { buildNotesFilter, buildSummaryPipeline } from '../src/services/noteService.js';
+
+const someUserId = new mongoose.Types.ObjectId();
+const someNoteId = new mongoose.Types.ObjectId();
+
+/** Every query in the index map: a name, the expected index, and a function returning its explain output. */
+const QUERIES = [
+  {
+    name: 'login / register: user by email',
+    index: 'email_1',
+    run: () => User.findOne({ email: 'someone@example.com' }).explain('executionStats'),
+  },
+  {
+    name: 'auth: user by id',
+    index: '_id_',
+    run: () => User.findById(someUserId).explain('executionStats'),
+  },
+  {
+    name: 'notes list (newest first)',
+    index: 'owner_1__id_-1',
+    run: () => Note.find(buildNotesFilter(someUserId)).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
+    name: 'notes list: pinned only',
+    index: 'owner_1__id_-1',
+    run: () =>
+      Note.find(buildNotesFilter(someUserId, { pinned: true })).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
+    name: 'notes list: by label',
+    index: 'owner_1__id_-1',
+    run: () =>
+      Note.find(buildNotesFilter(someUserId, { label: 'Work' })).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
+    name: 'notes list: search',
+    index: 'owner_1__id_-1',
+    run: () =>
+      Note.find(buildNotesFilter(someUserId, { q: 'index' })).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
+    name: 'note by id + owner (get / update / delete)',
+    index: ['_id_', 'owner_1__id_-1'],
+    run: () => Note.findOne({ _id: someNoteId, owner: someUserId }).explain('executionStats'),
+  },
+  {
+    name: 'labels: rename / delete (updateMany filter)',
+    index: 'owner_1__id_-1',
+    run: () => Note.find({ owner: someUserId, labels: 'Work' }).explain('executionStats'),
+  },
+  {
+    name: 'notes summary aggregate',
+    index: 'owner_1__id_-1',
+    run: () => Note.aggregate(buildSummaryPipeline(someUserId)).explain('executionStats'),
+  },
+];
+
+/** Recursively collects stage names and index names from an explain plan tree. */
+function collectStages(node, out = { stages: [], indexes: [] }) {
+  if (!node || typeof node !== 'object') return out;
+  if (node.stage) out.stages.push(node.stage);
+  if (node.indexName) out.indexes.push(node.indexName);
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) value.forEach((v) => collectStages(v, out));
+    else if (value && typeof value === 'object') collectStages(value, out);
+  }
+  return out;
+}
+
+/** Finds the winning plan in find() and aggregate() explain output. */
+function winningPlan(explain) {
+  return (
+    explain?.queryPlanner?.winningPlan ??
+    explain?.stages?.[0]?.$cursor?.queryPlanner?.winningPlan ??
+    explain
+  );
+}
+
+/**
+ * Runs every query and prints PASS/FAIL with the stages used.
+ *
+ * @returns {Promise<boolean>} True if every query uses its intended index without COLLSCAN or SORT.
+ */
+async function explainAll() {
+  let ok = true;
+  for (const query of QUERIES) {
+    const { stages, indexes } = collectStages(winningPlan(await query.run()));
+    const expected = [].concat(query.index);
+    const usesIndex =
+      expected.some((name) => indexes.includes(name)) || (expected.includes('_id_') && stages.includes('IDHACK'));
+    const pass = usesIndex && !stages.includes('COLLSCAN') && !stages.includes('SORT');
+    ok &&= pass;
+    console.log(`${pass ? 'PASS' : 'FAIL'}  ${query.name}`);
+    console.log(`      index: ${indexes.join(', ') || '-'}  stages: ${[...new Set(stages)].join(' > ')}`);
+  }
+  return ok;
+}
+
+try {
+  await connectDB();
+  const ok = await explainAll();
+  console.log(ok ? '\nOK: every query uses its index.' : '\nFAILED: see FAIL lines above.');
+  process.exitCode = ok ? 0 : 1;
+} catch (err) {
+  console.error(err);
+  process.exitCode = 1;
+} finally {
+  if (mongoose.connection.readyState) await disconnectDB();
+}
