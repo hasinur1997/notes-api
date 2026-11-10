@@ -1,17 +1,19 @@
 /**
- * /api/auth routes: register, login (rate-limited) and current user.
+ * /api/auth routes: register, login, current user, and password reset (rate-limited where abuse is possible).
  */
 import { Router } from 'express';
-import { login, me, register } from '../controllers/authController.js';
+import { forgotPassword, login, me, register, resetPassword } from '../controllers/authController.js';
 import { auth } from '../middleware/auth.js';
-import { loginLimiter } from '../middleware/rateLimit.js';
+import { forgotPasswordLimiter, loginLimiter, resetPasswordLimiter } from '../middleware/rateLimit.js';
 import { validate } from '../middleware/validate.js';
-import { loginBody, registerBody } from '../validators/auth.js';
+import { forgotPasswordBody, loginBody, registerBody, resetPasswordBody } from '../validators/auth.js';
 
 const router = Router();
 
 router.post('/register', validate({ body: registerBody }), register);
 router.post('/login', loginLimiter, validate({ body: loginBody }), login);
 router.get('/me', auth, me);
+router.post('/forgot-password', forgotPasswordLimiter, validate({ body: forgotPasswordBody }), forgotPassword);
+router.post('/reset-password', resetPasswordLimiter, validate({ body: resetPasswordBody }), resetPassword);
 
 export default router;

@@ -111,6 +111,31 @@ describe('GET /api/auth/me token checks', () => {
   });
 });
 
+describe('account routes require authentication', () => {
+  for (const [method, path] of [
+    ['PATCH', '/users/me'],
+    ['POST', '/users/me/avatar'],
+    ['DELETE', '/users/me/avatar'],
+  ]) {
+    it(`${method} ${path} -> 401`, async () => {
+      const res = await request(`${api.baseUrl}${path}`, { method, body: method === 'DELETE' ? undefined : {} });
+      assert.equal(res.status, 401);
+    });
+  }
+});
+
+describe('password reset validation', () => {
+  it('rejects malformed reset requests with 400 before touching the database', async () => {
+    const forgot = await request(`${api.baseUrl}/auth/forgot-password`, { method: 'POST', body: { email: 'nope' } });
+    assert.equal(forgot.status, 400);
+    const reset = await request(`${api.baseUrl}/auth/reset-password`, {
+      method: 'POST',
+      body: { email: 'a@b.co', token: 'x', password: 'correct-horse' },
+    });
+    assert.equal(reset.status, 400);
+  });
+});
+
 describe('POST /api/auth/login rate limit', () => {
   it('returns 429 after 10 attempts', async () => {
     const attempt = () => request(`${api.baseUrl}/auth/login`, { method: 'POST', body: {} });

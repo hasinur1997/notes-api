@@ -39,6 +39,16 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
+  // Public URL of the web app, used in emailed links (e.g. password reset).
+  APP_URL: z.url().default('http://localhost:3000'),
+  // Optional SMTP settings for sending email. Without SMTP_HOST, emails are printed to the
+  // console in development (so reset links can be tested) and not sent in production.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_SECURE: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  MAIL_FROM: z.string().min(3).default('Notes <no-reply@notes.local>'),
   // Where images are stored when Cloudinary is not configured.
   UPLOAD_DIR: z.string().min(1).default(path.join(PROJECT_ROOT, 'uploads')),
 });

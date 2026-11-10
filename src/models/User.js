@@ -30,6 +30,20 @@ const userSchema = new mongoose.Schema(
     interests: { type: [String], default: [], set: normalizeInterests },
     // Labels created in "Edit labels" before any note uses them (see services/noteService.js).
     labels: { type: [String], default: [], set: normalizeLabels },
+    // Profile photo, stored like note images (Cloudinary or the server's uploads folder).
+    avatar: {
+      type: new mongoose.Schema(
+        { url: String, publicId: String, width: Number, height: Number },
+        { _id: false },
+      ),
+      default: null,
+    },
+    // Password reset: only a SHA-256 hash of the emailed token is stored, never the token itself.
+    resetPasswordTokenHash: { type: String, select: false },
+    resetPasswordExpiresAt: { type: Date, select: false },
+    // Copied into every access token; a password reset increments it, which revokes all
+    // tokens issued before (exact, unlike comparing second-precision issue times).
+    tokenVersion: { type: Number, default: 0, select: false },
   },
   {
     timestamps: true,
@@ -38,6 +52,10 @@ const userSchema = new mongoose.Schema(
       // Defence in depth: never serialize the password, even if it was explicitly selected.
       transform: (doc, ret) => {
         delete ret.password;
+        delete ret.resetPasswordTokenHash;
+        delete ret.resetPasswordExpiresAt;
+        delete ret.tokenVersion;
+        if (ret.avatar) delete ret.avatar.publicId;
         return ret;
       },
     },

@@ -49,7 +49,7 @@ describe('notes (integration)', { skip }, () => {
     assert.equal(res.body.note.title, 'Groceries');
     assert.deepEqual(res.body.note.labels, ['Personal']);
     assert.equal(res.body.note.pinned, true);
-    assert.deepEqual(res.body.note.owner, { _id: ann.id, name: 'Ann', email: 'ann@example.com' });
+    assert.deepEqual(res.body.note.owner, { _id: ann.id, name: 'Ann', email: 'ann@example.com', avatar: null });
     assert.equal(res.body.note.isOwner, true);
     assert.equal(res.body.note.color, 'default');
     assert.equal(res.body.note.reminderAt, null);
@@ -183,7 +183,7 @@ describe('notes (integration)', { skip }, () => {
     it('owner shares by email; the collaborator sees, edits and finds it in lists and summary', async () => {
       const shared = await call(ann, 'POST', `/notes/${noteId}/collaborators`, { email: 'BOB@example.com' });
       assert.equal(shared.status, 200);
-      assert.deepEqual(shared.body.note.collaborators, [{ _id: bob.id, name: 'Bob', email: 'bob@example.com' }]);
+      assert.deepEqual(shared.body.note.collaborators, [{ _id: bob.id, name: 'Bob', email: 'bob@example.com', avatar: null }]);
 
       const list = await call(bob, 'GET', '/notes');
       assert.deepEqual(list.body.data.map((n) => [n.title, n.isOwner]), [['Shared plan', false]]);

@@ -21,7 +21,7 @@ const EDITABLE_FIELDS = ['title', 'content', 'labels', 'pinned', 'color', 'remin
 export const MAX_SUMMARY_LABELS = 100;
 
 /** Public fields of a person shown on a note. */
-const PERSON_FIELDS = { name: 1, email: 1 };
+const PERSON_FIELDS = { name: 1, email: 1, avatar: 1 };
 
 /**
  * Wraps conditions so they apply to notes the user owns OR that are shared with them.
@@ -97,9 +97,16 @@ export async function attachPeople(rawNotes, userId) {
   if (!ids.size) return notes;
 
   const people = await User.find({ _id: { $in: [...ids] } }, PERSON_FIELDS).lean();
-  const byId = new Map(people.map((person) => [String(person._id), person]));
+  // Only the public parts of a person: never the photo's storage id.
+  const toPublic = ({ _id, name, email, avatar }) => ({
+    _id,
+    name,
+    email,
+    avatar: avatar ? { url: avatar.url, width: avatar.width, height: avatar.height } : null,
+  });
+  const byId = new Map(people.map((person) => [String(person._id), toPublic(person)]));
   // A deleted account is shown as unknown rather than breaking the note.
-  const lookup = (id) => byId.get(String(id)) ?? { _id: id, name: 'Unknown user', email: '' };
+  const lookup = (id) => byId.get(String(id)) ?? { _id: id, name: 'Unknown user', email: '', avatar: null };
 
   return notes.map((note) => ({
     ...note,

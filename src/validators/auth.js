@@ -32,3 +32,15 @@ export const loginBody = z
     password: z.string().min(1, 'Password is required').max(72),
   })
   .strict();
+
+/** Body for POST /api/auth/forgot-password. */
+export const forgotPasswordBody = z.object({ email: emailField }).strict();
+
+/** Body for POST /api/auth/reset-password. The token is the 64-character hex value from the emailed link. */
+export const resetPasswordBody = z
+  .object({
+    email: emailField,
+    token: z.string().regex(/^[a-f0-9]{64}$/, 'Invalid reset link'),
+    password: passwordField,
+  })
+  .strict();

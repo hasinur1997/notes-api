@@ -104,7 +104,7 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 
 | Collection | Fields |
 |---|---|
-| users | `name`, `email` (lowercase, trimmed), `password` (`select: false`), `role` (`user` \| `admin`, default `user`), `interests` ([String], lowercased, trimmed, deduped), `labels` ([String], max 100: labels created in "Edit labels" before any note uses them), timestamps |
+| users | `name`, `email` (lowercase, trimmed), `password` (`select: false`), `role` (`user` \| `admin`, default `user`), `interests` ([String], lowercased, trimmed, deduped), `labels` ([String], max 100: labels created in "Edit labels" before any note uses them), `avatar` ({ url, publicId, width, height } or `null`), `resetPasswordTokenHash` / `resetPasswordExpiresAt` (`select: false`, SHA-256 of the emailed token), `tokenVersion` (`select: false`, in every JWT as `tv`; a password reset increments it to revoke older tokens), timestamps |
 | notes | `owner` (ObjectId → users, required), `title` (required, max 200), `content` (Markdown, max 20,000), `labels` ([String], max 10, trimmed, case-insensitive deduped, each max 30), `pinned` (Boolean, default `false`), `color` (palette key, default `default`), `reminderAt` (Date or `null`), `collaborators` ([ObjectId → users], max 10), `images` ([{ url, publicId, width, height }], max 5, stored on Cloudinary), timestamps |
 | posts | `author` (ObjectId → users, required), `title` (required), `body`, timestamps |
 
@@ -115,7 +115,10 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | POST | `/api/auth/register` | Public — role is always forced to `user` |
 | POST | `/api/auth/login` | Public, rate-limited |
 | GET | `/api/auth/me` | Auth |
+| POST | `/api/auth/forgot-password` | Public, rate-limited (5/15 min) — `{ email }`; always the same 200 reply; emails a 30-minute single-use link if the account exists |
+| POST | `/api/auth/reset-password` | Public, rate-limited (10/15 min) — `{ email, token, password }`; 400 `INVALID_RESET_TOKEN` if wrong/used/expired |
 | PATCH | `/api/users/me` | Auth — only `name`, `interests` |
+| POST, DELETE | `/api/users/me/avatar` | Auth — multipart `image` (same checks as note images); replacing or removing deletes the old file |
 | GET, POST | `/api/notes` | Auth — GET filters: `?pinned=true\|false`, `?label=`, `?q=` (search title/content) |
 | GET | `/api/notes/summary` | Auth — `{ totalNotes, labels: [{ name, count }] }` in one aggregate |
 | POST | `/api/notes/labels` | Auth — create a label no note uses yet (`{ name }`, stored on the user; 409 if it exists ignoring case) |
@@ -163,7 +166,8 @@ The frontend (`notes-web`) depends on these shapes. Do not change them.
 ### 3.6 Security Conventions
 
 - bcrypt cost 12, hashed in a `pre('save')` hook; admin password updates must go through `save()` so the hook runs
-- JWT payload `{ sub: userId, role }`, expiry from `JWT_EXPIRES_IN` (default `1d`)
+- JWT payload `{ sub: userId, role, tv }`, expiry from `JWT_EXPIRES_IN` (default `1d`); `auth` rejects a token whose `tv` differs from the user's `tokenVersion` (401 `TOKEN_REVOKED`)
+- Password reset: random 32-byte token, only its hash stored, 30-minute expiry, single use; the request endpoint never reveals whether an account exists (same reply, email sent in the background)
 - `auth` middleware: verify token → load user by id → attach `req.user` → 401 if missing
 - `requireRole('admin')` on the whole `/api/admin` router
 - Validate `body`, `params` and `query` with zod in every route; reject unknown fields with `.strict()`
@@ -214,6 +218,13 @@ CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
 UPLOAD_DIR=                # default ./uploads (local image storage; git-ignored)
+APP_URL=http://localhost:3000   # web app URL used in emailed links
+SMTP_HOST=                 # optional; without it emails are printed to the console in development
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASS=
+MAIL_FROM=Notes <no-reply@notes.local>
 ```
 
 ---

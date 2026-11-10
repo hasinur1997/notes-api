@@ -28,7 +28,7 @@ export function getBearerToken(header) {
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
  * @returns {Promise<void>}
- * @throws {ApiError} 401 with code NO_TOKEN, TOKEN_EXPIRED, INVALID_TOKEN or USER_NOT_FOUND.
+ * @throws {ApiError} 401 with code NO_TOKEN, TOKEN_EXPIRED, INVALID_TOKEN, USER_NOT_FOUND or TOKEN_REVOKED.
  */
 export async function auth(req, res, next) {
   const token = getBearerToken(req.get('authorization'));
@@ -50,9 +50,13 @@ export async function auth(req, res, next) {
     throw ApiError.unauthorized('Invalid token', 'INVALID_TOKEN');
   }
 
-  const user = await User.findById(payload.sub);
+  const user = await User.findById(payload.sub).select('+tokenVersion');
   if (!user) {
     throw ApiError.unauthorized('User no longer exists', 'USER_NOT_FOUND');
+  }
+  // A password reset increments tokenVersion, signing out every session that started before it.
+  if ((payload.tv ?? 0) !== (user.tokenVersion ?? 0)) {
+    throw ApiError.unauthorized('Your password was changed. Please sign in again.', 'TOKEN_REVOKED');
   }
 
   req.user = user;
