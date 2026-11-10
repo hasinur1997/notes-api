@@ -1,14 +1,24 @@
 /**
- * Creates the admin account from ADMIN_NAME, ADMIN_EMAIL and ADMIN_PASSWORD in .env.
- * Safe to run more than once: an existing admin is left unchanged.
+ * Seeds the database.
  *
- *   npm run seed
+ *   npm run seed                                   # create the admin from ADMIN_* in .env (idempotent)
+ *   npm run seed -- --fake --email you@x.com       # add ~120 marked test notes (+ shared ones) for that account
+ *   npm run seed -- --fake --email you@x.com --count 200
+ *   npm run seed -- --clear-fake --email you@x.com # remove exactly the marked test data
+ *
+ * Fake data is always marked, so --clear-fake never touches real notes.
  */
+import { parseArgs } from 'node:util';
 import mongoose from 'mongoose';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import { connectDB, disconnectDB } from '../src/config/db.js';
 import { env } from '../src/config/env.js';
 import { ensureAdmin } from '../src/services/adminSeed.js';
+import { clearFakeData, FAKE_COLLABORATOR, seedFakeData } from '../src/services/fakeSeed.js';
+import { emailField } from '../src/validators/auth.js';
+
+const DEFAULT_FAKE_COUNT = 120;
+const MAX_FAKE_COUNT = 2000;
 
 /** Turns validation issues into readable lines that name the env variable to fix. */
 function describeValidationError(err) {
@@ -16,19 +26,56 @@ function describeValidationError(err) {
   return err.issues.map((issue) => `  - ${variable[issue.path[0]] ?? issue.path.join('.')}: ${issue.message}`).join('\n');
 }
 
-try {
-  await connectDB();
+/** Reads and validates the command-line options. */
+function readOptions() {
+  const { values } = parseArgs({
+    options: {
+      fake: { type: 'boolean', default: false },
+      'clear-fake': { type: 'boolean', default: false },
+      email: { type: 'string' },
+      count: { type: 'string' },
+    },
+    strict: true,
+  });
+  const schema = z.object({
+    fake: z.boolean(),
+    clearFake: z.boolean(),
+    email: emailField.optional(),
+    count: z.coerce.number().int().min(1).max(MAX_FAKE_COUNT).default(DEFAULT_FAKE_COUNT),
+  });
+  const options = schema.parse({ fake: values.fake, clearFake: values['clear-fake'], email: values.email, count: values.count });
+  if ((options.fake || options.clearFake) && !options.email) {
+    throw new Error('--fake and --clear-fake need --email <the account to use>');
+  }
+  return options;
+}
+
+/** Creates the admin from .env. */
+async function seedAdmin() {
   const result = await ensureAdmin({ name: env.ADMIN_NAME, email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD });
-  console.log(
-    result.status === 'created'
-      ? `Admin created: ${result.email}`
-      : `Admin already exists: ${result.email} (unchanged)`,
-  );
+  console.log(result.status === 'created' ? `Admin created: ${result.email}` : `Admin already exists: ${result.email} (unchanged)`);
+}
+
+try {
+  const options = readOptions();
+  await connectDB();
+  if (options.clearFake) {
+    const { notes, users } = await clearFakeData(options);
+    console.log(`Removed ${notes} test notes${users ? ` and the ${FAKE_COLLABORATOR.email} test account` : ''}.`);
+  } else if (options.fake) {
+    const { own, sharedWithUser } = await seedFakeData(options);
+    console.log(
+      `Added ${own} test notes for ${options.email} and ${sharedWithUser} notes shared with it by ${FAKE_COLLABORATOR.email}.\n` +
+        `Remove them with: npm run seed -- --clear-fake --email ${options.email}`,
+    );
+  } else {
+    await seedAdmin();
+  }
 } catch (err) {
   if (err instanceof ZodError) {
-    console.error(`Cannot create the admin. Fix these values in .env:\n${describeValidationError(err)}`);
+    console.error(`Invalid values:\n${describeValidationError(err)}`);
   } else {
-    console.error(`Cannot create the admin: ${err.message}`);
+    console.error(`Seed failed: ${err.message}`);
   }
   process.exitCode = 1;
 } finally {

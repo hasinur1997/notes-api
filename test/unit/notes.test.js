@@ -42,14 +42,12 @@ describe('Note model', () => {
     assert.deepEqual([...note.images], []);
   });
 
-  it('rejects unknown colours', () => {
-    assert.ok(new Note({ owner: ownerId, title: 'A', color: 'neon' }).validateSync().errors.color);
+  it('rejects unknown colours', async () => {
+    await assert.rejects(new Note({ owner: ownerId, title: 'A', color: 'neon' }).validate(), (err) => Boolean(err.errors.color));
   });
 
-  it('requires owner and title', () => {
-    const err = new Note({}).validateSync();
-    assert.ok(err.errors.owner);
-    assert.ok(err.errors.title);
+  it('requires owner and title', async () => {
+    await assert.rejects(new Note({}).validate(), (err) => Boolean(err.errors.owner && err.errors.title));
   });
 });
 

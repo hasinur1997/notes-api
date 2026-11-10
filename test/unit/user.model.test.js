@@ -35,10 +35,11 @@ describe('User model', () => {
     assert.deepEqual([...user.interests], ['music', 'art']);
   });
 
-  it('defaults role to user and rejects unknown roles', () => {
+  it('defaults role to user and rejects unknown roles', async () => {
     assert.equal(new User({}).role, 'user');
-    const err = new User({ name: 'A', email: 'a@b.co', password: 'x', role: 'root' }).validateSync();
-    assert.ok(err?.errors.role);
+    await assert.rejects(new User({ name: 'A', email: 'a@b.co', password: 'x', role: 'root' }).validate(), (err) =>
+      Boolean(err.errors.role),
+    );
   });
 });
 
