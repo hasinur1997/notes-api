@@ -128,7 +128,7 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | POST | `/api/notes/:id/copy` | Owner or collaborator — copy becomes the caller's own note |
 | POST | `/api/notes/:id/collaborators` | Owner only — `{ email }` of a registered user |
 | DELETE | `/api/notes/:id/collaborators/:userId` | Owner, or the collaborator leaving |
-| POST, DELETE | `/api/notes/:id/images[/:imageId]` | Owner or collaborator — multipart `image`, JPEG/PNG/WebP/GIF ≤ 5 MB (verified from the file's bytes), rate-limited. Stored on Cloudinary when configured, otherwise on this server in `UPLOAD_DIR` and served at `/uploads/...` |
+| POST, PUT, DELETE | `/api/notes/:id/images[/:imageId]` | Owner or collaborator — multipart `image`, JPEG/PNG/WebP/GIF ≤ 5 MB (verified from the file's bytes), rate-limited. Stored on Cloudinary when configured, otherwise on this server in `UPLOAD_DIR` and served at `/uploads/...` (with `Access-Control-Allow-Origin: *` so the web app can crop them). `PUT` replaces an image in place (after cropping) and deletes the old file |
 | GET, POST | `/api/admin/users` | Admin |
 | GET, PATCH, DELETE | `/api/admin/users/:id` | Admin |
 | GET | `/api/admin/notes?owner=` | Admin |

@@ -40,6 +40,7 @@ router.delete('/:id/collaborators/:userId', validate({ params: collaboratorParam
 
 // Params are validated before the upload is read, so invalid requests never buffer a file.
 router.post('/:id/images', uploadLimiter, validate({ params: idParams }), imageUpload, notes.addImage);
+router.put('/:id/images/:imageId', uploadLimiter, validate({ params: imageParams }), imageUpload, notes.replaceImage);
 router.delete('/:id/images/:imageId', validate({ params: imageParams }), notes.removeImage);
 
 export default router;

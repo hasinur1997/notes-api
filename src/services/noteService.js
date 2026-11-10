@@ -419,3 +419,26 @@ export async function removeImage(noteId, userId, imageId) {
   const after = { ...before, images: images.filter((image) => String(image._id) !== imageId) };
   return { note: (await attachPeople([after], userId))[0], removed };
 }
+
+/**
+ * Replaces one image of a note the user can see with a newly uploaded one, keeping its position
+ * (used after cropping an existing image).
+ *
+ * @param {string} noteId - Validated ObjectId string.
+ * @param {import('mongoose').Types.ObjectId} userId - The authenticated user.
+ * @param {string} imageId - Validated ObjectId string of the image to replace.
+ * @param {() => Promise<{ url: string, publicId: string, width: number, height: number }>} upload - Stores the new file, called only after access checks pass.
+ * @returns {Promise<{ note: object, replaced: { publicId: string } }>} Updated note and the old image (to delete).
+ * @throws {ApiError} 404 if the note or image is not found or not accessible.
+ */
+export async function replaceImage(noteId, userId, imageId, upload) {
+  const filter = { _id: noteId, ...accessibleBy(userId), 'images._id': imageId };
+  const before = await Note.findOne(filter, { images: 1 }).lean();
+  const replaced = (before?.images ?? []).find((image) => String(image._id) === imageId);
+  if (!replaced) throw ApiError.notFound('Image not found');
+
+  const image = await upload();
+  const updated = await Note.findOneAndUpdate(filter, { $set: { 'images.$': image } }, { returnDocument: 'after' }).lean();
+  if (!updated) throw ApiError.notFound('Image not found');
+  return { note: (await attachPeople([updated], userId))[0], replaced };
+}

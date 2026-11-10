@@ -194,3 +194,21 @@ export async function removeImage(req, res) {
   await deleteImages([result.removed.publicId]);
   res.json({ note: result.note });
 }
+
+/**
+ * PUT /api/notes/:id/images/:imageId: replaces an image with a new upload (multipart field
+ * `image`), keeping its position, and deletes the old file. Used after cropping.
+ *
+ * @param {import('express').Request} req - Params: id, imageId. File: image.
+ * @param {import('express').Response} res - 200 `{ note }`.
+ * @returns {Promise<void>}
+ * @throws {ApiError} 400 if no file or not a valid image; 404 if the note or image is not found.
+ */
+export async function replaceImage(req, res) {
+  if (!req.file) throw ApiError.badRequest('Send one image in the "image" field', 'INVALID_UPLOAD');
+  const { note, replaced } = await noteService.replaceImage(req.params.id, req.user._id, req.params.imageId, () =>
+    uploadImage(req.file.buffer, `notes/${req.user._id}`),
+  );
+  await deleteImages([replaced.publicId]);
+  res.json({ note });
+}

@@ -258,6 +258,42 @@ describe('notes (integration)', { skip }, () => {
       assert.equal((await fetch(`${origin}${image.url}`)).status, 404);
     });
 
+    it('replaces an image in place (after cropping) and deletes the old file', async () => {
+      const { body } = await create(ann, { title: 'Crop me' });
+      const first = (await upload(ann, body.note._id, PNG_1X1)).body.note.images[0];
+      const second = (await upload(ann, body.note._id, PNG_1X1)).body.note.images[1];
+      const form = new FormData();
+      form.append('image', new Blob([JPEG_3X2], { type: 'image/jpeg' }), 'cropped.jpg');
+      const res = await fetch(`${api.baseUrl}/notes/${body.note._id}/images/${first._id}`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${ann.token}` },
+        body: form,
+      });
+      assert.equal(res.status, 200);
+      const { note } = await res.json();
+      assert.equal(note.images.length, 2);
+      assert.match(note.images[0].url, /\.jpg$/);
+      assert.deepEqual([note.images[0].width, note.images[0].height], [3, 2]);
+      assert.equal(note.images[1].url, second.url);
+      const origin = api.baseUrl.replace(/\/api$/, '');
+      assert.equal((await fetch(`${origin}${first.url}`)).status, 404);
+      const served = await fetch(`${origin}${note.images[0].url}`);
+      assert.equal(served.headers.get('access-control-allow-origin'), '*');
+
+      const missing = await fetch(`${api.baseUrl}/notes/${body.note._id}/images/${'0'.repeat(24)}`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${ann.token}` },
+        body: form,
+      });
+      assert.equal(missing.status, 404);
+      const other = await fetch(`${api.baseUrl}/notes/${body.note._id}/images/${second._id}`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${bob.token}` },
+        body: form,
+      });
+      assert.equal(other.status, 404);
+    });
+
     it('names the file by its real type, not the name or MIME type the client sent', async () => {
       const { body } = await create(ann, { title: 'Disguised' });
       const res = await upload(ann, body.note._id, JPEG_3X2, 'image/png', 'trick.png');

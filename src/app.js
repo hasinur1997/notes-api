@@ -42,8 +42,10 @@ app.use(
       res.set({
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy': "default-src 'none'; sandbox",
-        // The web app runs on another origin, so it must be allowed to embed these images.
+        // The web app runs on another origin, so it must be allowed to embed these images,
+        // and to read them (for cropping in a canvas). They are public, unguessable files.
         'Cross-Origin-Resource-Policy': 'cross-origin',
+        'Access-Control-Allow-Origin': '*',
       });
     },
   }),

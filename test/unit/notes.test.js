@@ -187,6 +187,7 @@ describe('/api/notes requires authentication', () => {
     ['POST', `/notes/${id}/collaborators`],
     ['DELETE', `/notes/${id}/collaborators/${id}`],
     ['POST', `/notes/${id}/images`],
+    ['PUT', `/notes/${id}/images/${id}`],
     ['DELETE', `/notes/${id}/images/${id}`],
   ]) {
     it(`${method} ${path} -> 401`, async () => {
