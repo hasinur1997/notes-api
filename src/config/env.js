@@ -38,7 +38,10 @@ if (!parsed.success) {
   const details = parsed.error.issues
     .map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`)
     .join('\n');
-  console.error(`Invalid environment variables:\n${details}`);
+  console.error(
+    `Invalid environment variables:\n${details}\n\n` +
+      'Copy .env.example to .env and fill in the values (MONGO_URI, JWT_SECRET, ...).',
+  );
   process.exit(1);
 }
 
