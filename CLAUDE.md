@@ -285,6 +285,7 @@ export async function listNotes(ownerId, { page, limit }) { ... }
 
 1. **Read before writing.** Check the existing model, route and service files before changing anything.
 2. **Work in small steps.** One feature per change. Make one commit per feature with a conventional message (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
+   Commits are authored only by the repository owner (the local `user.name` / `user.email`). Never add `Co-Authored-By:` trailers, "Generated with" lines or any other AI attribution to commit messages or PR descriptions.
 3. **Ask before** adding a dependency, an index or an endpoint not listed here.
 4. **After any query or model change**, run `npm run explain` and confirm the query still uses the intended index.
 5. **Before marking work done**, run `npm test` (all tests pass) and `npm run sync-indexes` (only `_id` + the 4 indexes exist).
