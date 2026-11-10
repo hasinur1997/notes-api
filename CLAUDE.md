@@ -90,7 +90,7 @@ src/
 ├── models/        User.js, Note.js, Post.js   ← schema + schema.index() only
 ├── middleware/    auth.js, requireRole.js, validate.js, errorHandler.js, rateLimit.js
 ├── controllers/   thin: parse request → call service/model → send response
-├── services/      aggregation pipelines (interestGroups.js, userPosts.js)
+├── services/      business logic and pipelines (noteService.js, adminService.js, interestGroups.js, userPosts.js)
 ├── routes/        one file per resource, mounted under /api
 ├── validators/    zod schemas per resource (auth.js, ...), shared field rules
 ├── utils/         pagination.js, ApiError.js, asyncHandler.js, token.js
@@ -130,9 +130,9 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | POST | `/api/notes/:id/collaborators` | Owner only — `{ email }` of a registered user |
 | DELETE | `/api/notes/:id/collaborators/:userId` | Owner, or the collaborator leaving |
 | POST, PUT, DELETE | `/api/notes/:id/images[/:imageId]` | Owner or collaborator — multipart `image`, JPEG/PNG/WebP/GIF ≤ 5 MB (verified from the file's bytes), rate-limited. Stored on Cloudinary when configured, otherwise on this server in `UPLOAD_DIR` and served at `/uploads/...` (with `Access-Control-Allow-Origin: *` so the web app can crop them). `PUT` replaces an image in place (after cropping) and deletes the old file |
-| GET, POST | `/api/admin/users` | Admin |
-| GET, PATCH, DELETE | `/api/admin/users/:id` | Admin |
-| GET | `/api/admin/notes?owner=` | Admin |
+| GET, POST | `/api/admin/users` | Admin — GET: page of users newest first (`_id` index, total from `estimatedDocumentCount`), or `?email=` exact lookup (`email_1`, ≤ 1 result, no sort). POST: `{ name, email, password, role?, interests? }` → 201 `{ user }`, 409 duplicate |
+| GET, PATCH, DELETE | `/api/admin/users/:id` | Admin — PATCH any of `name`, `email`, `role`, `interests`, `password` (a new password bumps `tokenVersion`, signing the user out); 403 `SELF_ROLE_CHANGE` / `SELF_DELETE` for the admin's own account, so at least one admin always remains. DELETE → 204, removes their notes (+ images), avatar and collaborator entries |
+| GET | `/api/admin/notes?owner=` | Admin — every note newest first, read-only (`_id` index; with `owner`, `{ owner: 1, _id: -1 }`); notes include `owner` / `collaborators` as people |
 | GET | `/api/admin/users/grouped-by-interest?interest=` | Admin — Scenario 1 |
 | GET, POST | `/api/posts` | GET public, POST auth |
 | GET | `/api/users/:id/posts` | Public — Scenario 2 |

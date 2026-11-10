@@ -83,6 +83,31 @@ const QUERIES = [
     index: BOTH,
     run: () => Note.aggregate(buildSummaryPipeline(someUserId)).explain('executionStats'),
   },
+  {
+    name: 'admin: users list (newest first)',
+    index: '_id_',
+    run: () => User.find({}).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
+    name: 'admin: user by exact email',
+    index: 'email_1',
+    run: () => User.find({ email: 'someone@example.com' }).limit(1).explain('executionStats'),
+  },
+  {
+    name: 'admin: all notes (newest first)',
+    index: '_id_',
+    run: () => Note.find({}).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
+    name: 'admin: notes by owner (list, count, delete cascade)',
+    index: 'owner_1__id_-1',
+    run: () => Note.find({ owner: someUserId }).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
+    name: 'admin: delete cascade, shared notes (updateMany filter)',
+    index: 'collaborators_1__id_-1',
+    run: () => Note.find({ collaborators: someUserId }).explain('executionStats'),
+  },
 ];
 
 /** Recursively collects stage names and index names from an explain plan tree. */
