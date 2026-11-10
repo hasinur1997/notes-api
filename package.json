@@ -13,7 +13,8 @@
     "start": "node src/server.js",
     "test": "node --test \"test/**/*.test.js\"",
     "sync-indexes": "node scripts/sync-indexes.js",
-    "explain": "node scripts/explain.js"
+    "explain": "node scripts/explain.js",
+    "seed": "node scripts/seed.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

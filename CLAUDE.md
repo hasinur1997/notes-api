@@ -73,8 +73,8 @@
 npm install
 npm run dev            # nodemon src/server.js
 npm start              # node src/server.js (production)
-npm run seed           # creates admin from env + optional fake data
-npm run seed -- --fake # adds ~1000 users, ~5000 notes, ~2000 posts for index testing
+npm run seed           # creates the admin from ADMIN_NAME / ADMIN_EMAIL / ADMIN_PASSWORD (idempotent; never promotes an existing user)
+npm run seed -- --fake # (planned, needs the Post model) ~1000 users, ~5000 notes, ~2000 posts for index testing
 npm run sync-indexes   # Model.syncIndexes() on all models, prints getIndexes()
 npm run explain        # runs explain("executionStats") on every query in the index map
 npm test               # unit tests; database tests also run when TEST_MONGO_URI is set
