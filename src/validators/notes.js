@@ -73,7 +73,7 @@ export const updateNoteBody = z
 /** Params for /api/notes/labels/:name. */
 export const labelParams = z.object({ name: labelField }).strict();
 
-/** Body for PATCH /api/notes/labels/:name. */
+/** Body for POST /api/notes/labels and PATCH /api/notes/labels/:name. */
 export const renameLabelBody = z.object({ name: labelField }).strict();
 
 /** Body for POST /api/notes/:id/collaborators. */

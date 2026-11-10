@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import mongoose from 'mongoose';
 import { Note, normalizeLabels } from '../../src/models/Note.js';
-import { accessibleBy, buildNotesFilter } from '../../src/services/noteService.js';
+import { accessibleBy, buildNotesFilter, mergeLabels } from '../../src/services/noteService.js';
 import { escapeRegex } from '../../src/utils/escapeRegex.js';
 import {
   addCollaboratorBody,
@@ -59,6 +59,24 @@ describe('normalizeLabels', () => {
       'Work',
       'Interview prep',
       'Ideas',
+    ]);
+  });
+});
+
+describe('mergeLabels', () => {
+  it('adds created labels with count 0, skips case-insensitive duplicates, sorts ignoring case', () => {
+    const merged = mergeLabels(
+      [
+        { name: 'Work', count: 3 },
+        { name: 'JavaScript', count: 1 },
+      ],
+      ['work', 'bedIQ', 'Python'],
+    );
+    assert.deepEqual(merged, [
+      { name: 'bedIQ', count: 0 },
+      { name: 'JavaScript', count: 1 },
+      { name: 'Python', count: 0 },
+      { name: 'Work', count: 3 },
     ]);
   });
 });
@@ -164,6 +182,7 @@ describe('/api/notes requires authentication', () => {
     ['GET', `/notes/${id}`],
     ['PATCH', `/notes/${id}`],
     ['DELETE', `/notes/${id}`],
+    ['POST', '/notes/labels'],
     ['PATCH', '/notes/labels/Work'],
     ['DELETE', '/notes/labels/Work'],
     ['POST', `/notes/${id}/copy`],

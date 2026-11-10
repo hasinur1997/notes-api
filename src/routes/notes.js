@@ -26,6 +26,7 @@ router.get('/', validate({ query: listNotesQuery }), notes.listNotes);
 router.post('/', validate({ body: createNoteBody }), notes.createNote);
 
 router.get('/summary', notes.getSummary);
+router.post('/labels', validate({ body: renameLabelBody }), notes.createLabel);
 router.patch('/labels/:name', validate({ params: labelParams, body: renameLabelBody }), notes.renameLabel);
 router.delete('/labels/:name', validate({ params: labelParams }), notes.deleteLabel);
 

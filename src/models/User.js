@@ -3,6 +3,7 @@
  */
 import bcrypt from 'bcrypt';
 import mongoose from 'mongoose';
+import { normalizeLabels } from '../utils/labels.js';
 
 /** Allowed user roles. New accounts are always `user`. */
 export const ROLES = Object.freeze(['user', 'admin']);
@@ -27,6 +28,8 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     role: { type: String, enum: ROLES, default: 'user' },
     interests: { type: [String], default: [], set: normalizeInterests },
+    // Labels created in "Edit labels" before any note uses them (see services/noteService.js).
+    labels: { type: [String], default: [], set: normalizeLabels },
   },
   {
     timestamps: true,

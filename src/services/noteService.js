@@ -9,6 +9,7 @@
  */
 import { MAX_COLLABORATORS, MAX_IMAGES_PER_NOTE, Note } from '../models/Note.js';
 import { User } from '../models/User.js';
+import { compareLabels, MAX_USER_LABELS, normalizeLabels } from '../utils/labels.js';
 import { ApiError } from '../utils/ApiError.js';
 import { escapeRegex } from '../utils/escapeRegex.js';
 import { buildListResponse, getPagination } from '../utils/pagination.js';
@@ -155,18 +156,62 @@ export function buildSummaryPipeline(userId) {
 }
 
 /**
- * Returns the sidebar summary in one aggregate call, labels sorted by name.
+ * Combines labels used on notes (with counts) and labels the user created in "Edit labels"
+ * (count 0 until a note uses them). A created label is skipped if a note label already has
+ * the same name ignoring case. Sorted by name, ignoring case.
  *
- * @param {import('mongoose').Types.ObjectId} userId - The requesting user.
+ * @param {{ name: string, count: number }[]} noteLabels - From the summary aggregate.
+ * @param {string[]} userLabels - The user's created labels.
+ * @returns {{ name: string, count: number }[]} Merged, sorted labels.
+ */
+export function mergeLabels(noteLabels, userLabels) {
+  const known = new Set(noteLabels.map((label) => label.name.toLowerCase()));
+  const created = userLabels.filter((name) => !known.has(name.toLowerCase())).map((name) => ({ name, count: 0 }));
+  return [...noteLabels, ...created].sort((a, b) => compareLabels(a.name, b.name));
+}
+
+/**
+ * Returns the sidebar summary: one aggregate call on notes, merged with the user's created labels
+ * (already loaded with the user by the auth middleware, so no extra query).
+ *
+ * @param {{ _id: import('mongoose').Types.ObjectId, labels?: string[] }} user - The requesting user.
  * @returns {Promise<{ totalNotes: number, reminders: number, labels: { name: string, count: number }[] }>}
  */
-export async function getNotesSummary(userId) {
-  const [result] = await Note.aggregate(buildSummaryPipeline(userId));
+export async function getNotesSummary(user) {
+  const [result] = await Note.aggregate(buildSummaryPipeline(user._id));
   return {
     totalNotes: result.total[0]?.count ?? 0,
     reminders: result.reminders[0]?.count ?? 0,
-    labels: result.labels,
+    labels: mergeLabels(result.labels, user.labels ?? []),
   };
+}
+
+/**
+ * Creates a label without attaching it to a note ("Create new label" in Edit labels).
+ *
+ * @param {{ _id: import('mongoose').Types.ObjectId, labels?: string[] }} user - The requesting user.
+ * @param {string} name - Validated label name.
+ * @returns {Promise<{ name: string, count: number }>} The new label.
+ * @throws {ApiError} 409 if a label with that name exists (ignoring case); 400 if the limit is reached.
+ */
+export async function createLabel(user, name) {
+  const { labels } = await getNotesSummary(user);
+  if (labels.some((label) => label.name.toLowerCase() === name.toLowerCase())) {
+    throw ApiError.conflict('A label with this name already exists', 'LABEL_EXISTS');
+  }
+  if ((user.labels ?? []).length >= MAX_USER_LABELS) {
+    throw ApiError.badRequest(`You can create at most ${MAX_USER_LABELS} labels`, 'LIMIT_REACHED');
+  }
+  await User.updateOne({ _id: user._id }, { $addToSet: { labels: name } });
+  return { name, count: 0 };
+}
+
+/** Writes the user's created labels after a rename or delete, only if they changed. */
+async function updateUserLabels(user, change) {
+  const current = user.labels ?? [];
+  const next = normalizeLabels(change(current));
+  const changed = next.length !== current.length || next.some((label, i) => label !== current[i]);
+  if (changed) await User.updateOne({ _id: user._id }, { $set: { labels: next } });
 }
 
 /**
@@ -238,33 +283,43 @@ export async function copyNote(noteId, userId) {
 }
 
 /**
- * Renames a label on every note the user can see. If a note already has the new name, they merge.
- * Adds the new name first, then removes the old one, so a failure never loses a label.
+ * Renames a label on every note the user can see, and in the user's created labels.
+ * If a note already has the new name, they merge. Adds the new name first, then removes the
+ * old one, so a failure never loses a label.
  *
- * @param {import('mongoose').Types.ObjectId} userId - The authenticated user.
+ * @param {{ _id: import('mongoose').Types.ObjectId, labels?: string[] }} user - The requesting user.
  * @param {string} from - Existing label (exact match).
  * @param {string} to - New label.
- * @returns {Promise<number>} Number of notes that had the label.
+ * @returns {Promise<{ found: boolean, notesUpdated: number }>} Whether the label existed, and notes changed.
  */
-export async function renameLabel(userId, from, to) {
-  const filter = accessibleBy(userId, { labels: from });
-  if (from === to) return Note.countDocuments(filter);
+export async function renameLabel(user, from, to) {
+  const filter = accessibleBy(user._id, { labels: from });
+  const inUserLabels = (user.labels ?? []).includes(from);
+  if (inUserLabels) await updateUserLabels(user, (labels) => labels.map((label) => (label === from ? to : label)));
+
+  if (from === to) {
+    const count = await Note.countDocuments(filter);
+    return { found: inUserLabels || count > 0, notesUpdated: 0 };
+  }
   await Note.updateMany(filter, { $addToSet: { labels: to } });
   // Every note that still has the old label is touched here, so this count is the number renamed.
   const { modifiedCount } = await Note.updateMany(filter, { $pull: { labels: from } });
-  return modifiedCount;
+  return { found: inUserLabels || modifiedCount > 0, notesUpdated: modifiedCount };
 }
 
 /**
- * Removes a label from every note the user can see (the notes themselves are kept).
+ * Removes a label from every note the user can see and from the user's created labels
+ * (the notes themselves are kept).
  *
- * @param {import('mongoose').Types.ObjectId} userId - The authenticated user.
+ * @param {{ _id: import('mongoose').Types.ObjectId, labels?: string[] }} user - The requesting user.
  * @param {string} name - Label to remove (exact match).
- * @returns {Promise<number>} Number of notes updated.
+ * @returns {Promise<{ found: boolean, notesUpdated: number }>} Whether the label existed, and notes changed.
  */
-export async function deleteLabel(userId, name) {
-  const { modifiedCount } = await Note.updateMany(accessibleBy(userId, { labels: name }), { $pull: { labels: name } });
-  return modifiedCount;
+export async function deleteLabel(user, name) {
+  const inUserLabels = (user.labels ?? []).includes(name);
+  if (inUserLabels) await updateUserLabels(user, (labels) => labels.filter((label) => label !== name));
+  const { modifiedCount } = await Note.updateMany(accessibleBy(user._id, { labels: name }), { $pull: { labels: name } });
+  return { found: inUserLabels || modifiedCount > 0, notesUpdated: modifiedCount };
 }
 
 /**

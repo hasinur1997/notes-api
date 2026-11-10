@@ -257,4 +257,42 @@ describe('notes (integration)', { skip }, () => {
     assert.equal((await call(ann, 'POST', `/notes/${insertedId}/collaborators`, { email: 'bob@example.com' })).status, 200);
     assert.equal((await call(ann, 'DELETE', `/notes/${insertedId}`)).status, 204);
   });
+
+  describe('created labels', () => {
+    it('creates a label with no notes; it shows in the summary with count 0, sorted ignoring case', async () => {
+      await create(ann, { title: 'a', labels: ['Work'] });
+      const res = await call(ann, 'POST', '/notes/labels', { name: ' bedIQ ' });
+      assert.equal(res.status, 201);
+      assert.deepEqual(res.body.label, { name: 'bedIQ', count: 0 });
+      const summary = await call(ann, 'GET', '/notes/summary');
+      assert.deepEqual(summary.body.labels, [
+        { name: 'bedIQ', count: 0 },
+        { name: 'Work', count: 1 },
+      ]);
+      assert.deepEqual((await call(bob, 'GET', '/notes/summary')).body.labels, []);
+    });
+
+    it('rejects duplicates ignoring case, whether created or used on a note', async () => {
+      await create(ann, { title: 'a', labels: ['Work'] });
+      await call(ann, 'POST', '/notes/labels', { name: 'Ideas' });
+      assert.equal((await call(ann, 'POST', '/notes/labels', { name: 'work' })).status, 409);
+      assert.equal((await call(ann, 'POST', '/notes/labels', { name: 'IDEAS' })).status, 409);
+    });
+
+    it('renames and deletes a label that only exists as a created label', async () => {
+      await call(ann, 'POST', '/notes/labels', { name: 'Draft' });
+      const renamed = await call(ann, 'PATCH', '/notes/labels/Draft', { name: 'Drafts' });
+      assert.deepEqual(renamed.body, { label: 'Drafts', notesUpdated: 0 });
+      assert.deepEqual((await call(ann, 'GET', '/notes/summary')).body.labels, [{ name: 'Drafts', count: 0 }]);
+      assert.equal((await call(ann, 'DELETE', '/notes/labels/Drafts')).status, 204);
+      assert.deepEqual((await call(ann, 'GET', '/notes/summary')).body.labels, []);
+      assert.equal((await call(ann, 'DELETE', '/notes/labels/Drafts')).status, 404);
+    });
+
+    it('a created label that a note starts using keeps one entry with the note count', async () => {
+      await call(ann, 'POST', '/notes/labels', { name: 'Python' });
+      await create(ann, { title: 'a', labels: ['Python'] });
+      assert.deepEqual((await call(ann, 'GET', '/notes/summary')).body.labels, [{ name: 'Python', count: 1 }]);
+    });
+  });
 });

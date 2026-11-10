@@ -2,35 +2,15 @@
  * Note model: a private note with labels, pin, colour, reminder, images and collaborators.
  */
 import mongoose from 'mongoose';
+import { normalizeLabels } from '../utils/labels.js';
 
-export const MAX_LABELS_PER_NOTE = 10;
-export const MAX_LABEL_LENGTH = 30;
+export { MAX_LABEL_LENGTH, MAX_LABELS_PER_NOTE, normalizeLabels } from '../utils/labels.js';
+
 export const MAX_COLLABORATORS = 10;
 export const MAX_IMAGES_PER_NOTE = 5;
 
 /** Background colours a note can have. The frontend maps each key to a colour from the app palette. */
 export const NOTE_COLORS = Object.freeze(['default', 'amber', 'coral', 'rose', 'lavender', 'sky', 'mint', 'sand']);
-
-/**
- * Normalizes a label list: trims, collapses inner whitespace, drops empties, and removes
- * case-insensitive duplicates (keeping the first spelling). Used as the schema setter so
- * every create and update stores labels the same way.
- *
- * @param {unknown[]} [values=[]] - Raw label values.
- * @returns {string[]} Clean, unique labels in their original order.
- */
-export function normalizeLabels(values = []) {
-  const seen = new Set();
-  const labels = [];
-  for (const value of values) {
-    const label = String(value).trim().replace(/\s+/g, ' ');
-    const key = label.toLowerCase();
-    if (!label || seen.has(key)) continue;
-    seen.add(key);
-    labels.push(label);
-  }
-  return labels;
-}
 
 /** An image stored on Cloudinary. `publicId` is kept so the file can be deleted with the note. */
 const imageSchema = new mongoose.Schema(

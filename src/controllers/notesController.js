@@ -27,7 +27,7 @@ export async function listNotes(req, res) {
  * @returns {Promise<void>}
  */
 export async function getSummary(req, res) {
-  res.json(await noteService.getNotesSummary(req.user._id));
+  res.json(await noteService.getNotesSummary(req.user));
 }
 
 /**
@@ -108,8 +108,8 @@ export async function deleteNote(req, res) {
  * @throws {ApiError} 404 if no note has the label.
  */
 export async function renameLabel(req, res) {
-  const notesUpdated = await noteService.renameLabel(req.user._id, req.params.name, req.body.name);
-  if (!notesUpdated) throw ApiError.notFound('Label not found');
+  const { found, notesUpdated } = await noteService.renameLabel(req.user, req.params.name, req.body.name);
+  if (!found) throw ApiError.notFound('Label not found');
   res.json({ label: req.body.name, notesUpdated });
 }
 
@@ -122,9 +122,21 @@ export async function renameLabel(req, res) {
  * @throws {ApiError} 404 if no note has the label.
  */
 export async function deleteLabel(req, res) {
-  const notesUpdated = await noteService.deleteLabel(req.user._id, req.params.name);
-  if (!notesUpdated) throw ApiError.notFound('Label not found');
+  const { found } = await noteService.deleteLabel(req.user, req.params.name);
+  if (!found) throw ApiError.notFound('Label not found');
   res.status(204).end();
+}
+
+/**
+ * POST /api/notes/labels: creates a label that no note uses yet.
+ *
+ * @param {import('express').Request} req - Body: { name }.
+ * @param {import('express').Response} res - 201 `{ label: { name, count } }`.
+ * @returns {Promise<void>}
+ * @throws {ApiError} 409 if it already exists (ignoring case); 400 if the limit is reached.
+ */
+export async function createLabel(req, res) {
+  res.status(201).json({ label: await noteService.createLabel(req.user, req.body.name) });
 }
 
 /**
