@@ -88,7 +88,8 @@ src/
 ├── controllers/   thin: parse request → call service/model → send response
 ├── services/      aggregation pipelines (interestGroups.js, userPosts.js)
 ├── routes/        one file per resource, mounted under /api
-├── utils/         pagination.js, ApiError.js, asyncHandler.js
+├── validators/    zod schemas per resource (auth.js, ...), shared field rules
+├── utils/         pagination.js, ApiError.js, asyncHandler.js, token.js
 ├── app.js         express app (middleware + routes)
 └── server.js      connects DB, starts server
 scripts/           seed.js, sync-indexes.js, explain.js
@@ -195,18 +196,99 @@ ADMIN_PASSWORD=
 
 ---
 
-## 4. Workflow for the Agent
+## 4. Coding Rules
+
+Every coding agent and contributor follows these rules for every change. If a rule conflicts with Section 2 (Hard Rules), Section 2 wins.
+
+### 4.1 Design (SOLID, applied to Express + Mongoose)
+
+- **Single responsibility.** One reason to change per module:
+  - `routes/` wire URL + middleware + controller, and nothing else.
+  - `validators/` hold zod schemas only.
+  - `controllers/` read the validated request, call one model method or service, and send the response. No business rules, no pipelines.
+  - `services/` hold business logic and aggregation pipelines. They never touch `req` or `res`.
+  - `models/` hold the schema, `schema.index()` calls, hooks and small instance methods.
+  - `middleware/` handle one cross-cutting concern each (auth, roles, validation, errors, rate limits).
+- **Open/closed.** Extend behaviour with configuration or factories (`validate(schemas)`, `requireRole(...roles)`) instead of editing shared code for each new case.
+- **Liskov substitution.** Functions that share a role share a contract: every middleware is `(req, res, next)`, every error is an `ApiError` (or is normalized into one), every list returns `{ data, meta }`.
+- **Interface segregation.** Export small, focused functions. A caller imports only what it uses; no "god" utility modules.
+- **Dependency inversion.** Services take plain inputs (ids, filters, `{ page, limit }`) and return plain data, so they can be called from controllers, scripts and tests alike. Configuration comes from `config/env.js`, never from `process.env` directly.
+- Do not add classes, layers or abstractions until at least two real callers need them. Plain functions are the default; `ApiError` is the model for when a class is justified.
+
+### 4.2 Security (mandatory for every feature)
+
+Security is checked on every change, not added afterwards. Every feature must satisfy all of these:
+
+- **Validate all input.** Every route validates `params`, `query` and `body` with a `.strict()` zod schema. Bound every string length, array size and number range.
+- **Authenticate and authorize on the server.** Protected routes use `auth`; admin routes use `requireRole('admin')`. The role is read from the database user, never from the token or request.
+- **Enforce ownership inside the query** (`{ _id, owner: req.user.id }`). Not found and not owned both return 404.
+- **Never trust the client for privileged fields.** Build create/update objects from an explicit whitelist. Never spread `req.body`. `role`, `owner`, `author`, `_id` and timestamps are set by the server only.
+- **Prevent NoSQL injection.** Only validated, typed values reach a query. Never pass raw request objects into a filter, and never build `$where`, `$expr` or regexes from user input without escaping.
+- **Protect secrets and personal data.** Never log or return passwords, tokens, hashes or `JWT_SECRET`. Every user projection excludes `password`. Production errors never include stack traces or internal messages.
+- **Fail closed.** On any doubt (missing token, invalid id, unexpected error), deny access and return the standard error shape.
+- **Keep dependencies minimal and current.** Ask before adding one; run `npm audit` after adding one and resolve high or critical findings.
+- **Review checklist.** Before committing a feature, check: input validated, auth/role applied, ownership in query, no sensitive fields returned, error path tested.
+
+### 4.3 Performance
+
+- Every query must use an index from Section 2. Confirm with `npm run explain` (`IXSCAN`, no `COLLSCAN`, no in-memory `SORT`).
+- One database round trip per read where possible. Use aggregation pipelines for joins and grouping; never query inside a loop (no N+1).
+- Use `.lean()` for read-only queries that do not need document methods or hooks.
+- Project only the fields the response needs.
+- Every list is paginated and bounded (`limit` max 50).
+- Use `Promise.all` for independent async work; never block the event loop with synchronous CPU-heavy work (the only sync bcrypt call is the one-time startup hash).
+
+### 4.4 Readability and structure
+
+- ES modules, `async/await`, `const` by default. No callbacks, no `var`.
+- Small functions with one job. A function longer than ~40 lines or nested more than 3 levels deep should be split.
+- Descriptive names: functions are verbs (`findUserNotes`), booleans read as questions (`isOwner`, `hasRole`), constants are `UPPER_SNAKE_CASE`.
+- File names: `camelCase.js` for modules, `PascalCase.js` for models and classes.
+- No magic numbers or strings: name them as constants (`BCRYPT_COST`, `MAX_LIMIT`).
+- No dead code, commented-out code or unused imports in commits.
+- Reuse before writing: check `utils/`, `validators/` and `middleware/` for an existing helper first.
+
+### 4.5 Comments and documentation
+
+- **Every exported function, class and middleware has a JSDoc comment** with a one-sentence summary, `@param` for each parameter, `@returns`, and `@throws` when it can throw an `ApiError`.
+- Non-exported helpers get at least a one-line comment saying what they do.
+- Inline comments explain **why**, not what (for example, why a dummy hash is compared, why `req.query` is redefined).
+- Keep comments accurate: update or delete them when the code changes.
+
+```js
+/**
+ * Returns a page of the user's own notes, newest first.
+ * Uses the { owner: 1, _id: -1 } index.
+ *
+ * @param {string} ownerId - Id of the authenticated user.
+ * @param {{ page: number, limit: number }} pagination - Validated pagination values.
+ * @returns {Promise<{ data: object[], meta: object }>} Standard list response.
+ */
+export async function listNotes(ownerId, { page, limit }) { ... }
+```
+
+### 4.6 Testability
+
+- Every feature is written so it can be tested without a running HTTP server or real network: services take plain arguments and return plain data; `app.js` exports the app without calling `listen()`.
+- Tests use Node's built-in runner (`node:test` + `node:assert/strict`) and run with `npm test`. Ask before adding any test dependency.
+- Every endpoint has tests for the success path, validation failure (400), missing auth (401), wrong role (403) and not found / not owned (404) where they apply.
+- Tests run against a separate test database and clean up after themselves. Never run tests against production data.
+- A bug fix comes with a test that fails before the fix and passes after it.
+
+---
+
+## 5. Workflow for the Agent
 
 1. **Read before writing.** Check the existing model, route and service files before changing anything.
 2. **Work in small steps.** One feature per change. Make one commit per feature with a conventional message (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
 3. **Ask before** adding a dependency, an index or an endpoint not listed here.
 4. **After any query or model change**, run `npm run explain` and confirm the query still uses the intended index.
-5. **Before marking work done**, run `npm run sync-indexes` and confirm only `_id` + the 4 indexes exist.
+5. **Before marking work done**, run `npm test` (all tests pass) and `npm run sync-indexes` (only `_id` + the 4 indexes exist).
 6. **Do not invent requirements.** If something is not in this file or `../docs/project-over.md`, ask.
 
 ---
 
-## 5. Definition of Done
+## 6. Definition of Done
 
 A backend feature is done when:
 
@@ -215,11 +297,14 @@ A backend feature is done when:
 - [ ] List responses follow the pagination contract
 - [ ] `npm run explain` shows `IXSCAN` (no `COLLSCAN`, no in-memory `SORT`) for the new query
 - [ ] No new index was introduced
+- [ ] The Section 4.2 security checklist passes
+- [ ] Every new exported function, class and middleware has a JSDoc comment
+- [ ] Tests cover the success and error paths, and `npm test` passes
 - [ ] The Postman collection has a request for it
 
 ---
 
-## 6. Never Do
+## 7. Never Do
 
 - Add `index: true` / `unique: true` to a field, or any index not in Section 2
 - Sort a list by `createdAt`
