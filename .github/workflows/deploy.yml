@@ -1,0 +1,147 @@
+name: Test and Deploy to cPanel
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: notes-api-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  deploy:
+    name: Deploy to cPanel
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      DEPLOY_PATH: ${{ secrets.CPANEL_DEPLOY_PATH }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install SSH tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync openssh-client
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.CPANEL_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.CPANEL_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/notes_api_deploy
+          chmod 600 ~/.ssh/notes_api_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Check SSH connection and create deployment directories
+        env:
+          CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+          CPANEL_PORT: ${{ secrets.CPANEL_PORT }}
+          CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
+        run: |
+          ssh -i ~/.ssh/notes_api_deploy \
+            -p "$CPANEL_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$CPANEL_USERNAME@$CPANEL_HOST" \
+            "mkdir -p '$DEPLOY_PATH' '$DEPLOY_PATH/tmp'"
+
+      # The whole production .env lives in one secret, ENV_FILE (KEY=value per line, same format as .env).
+      # NODE_ENV is always forced to production; Windows line endings from copy-paste are removed.
+      - name: Build production .env
+        env:
+          ENV_FILE: ${{ vars.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ENV_FILE:-}" ]; then
+            echo "::error::ENV_FILE secret is not set in the production environment"
+            exit 1
+          fi
+
+          umask 077
+          env_file="$RUNNER_TEMP/notes-api.env"
+          printf '%s\n' "$ENV_FILE" | tr -d '\r' | grep -v '^[[:space:]]*NODE_ENV[[:space:]]*=' > "$env_file" || true
+          echo "NODE_ENV=production" >> "$env_file"
+
+      # Uploaded as .env.next; it replaces .env only after the app's own schema accepts it.
+      - name: Upload .env
+        env:
+          CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+          CPANEL_PORT: ${{ secrets.CPANEL_PORT }}
+          CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
+        run: |
+          ssh -i ~/.ssh/notes_api_deploy \
+            -p "$CPANEL_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$CPANEL_USERNAME@$CPANEL_HOST" \
+            "umask 077 && cat > '$DEPLOY_PATH/.env.next'" < "$RUNNER_TEMP/notes-api.env"
+          rm -f "$RUNNER_TEMP/notes-api.env"
+
+      - name: Sync application files
+        env:
+          CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+          CPANEL_PORT: ${{ secrets.CPANEL_PORT }}
+          CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
+        run: |
+          rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='node_modules/' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='!.env.example' \
+            --exclude='tmp/' \
+            --exclude='coverage/' \
+            -e "ssh -i ~/.ssh/notes_api_deploy -p $CPANEL_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes" \
+            ./ "$CPANEL_USERNAME@$CPANEL_HOST:$DEPLOY_PATH/"
+
+      # The new .env is checked with src/config/env.js (values from --env-file win over the old .env)
+      # before it goes live, so a missing or invalid value fails the deploy instead of the running app.
+      - name: Install production dependencies, apply .env and restart Passenger
+        env:
+          CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+          CPANEL_PORT: ${{ secrets.CPANEL_PORT }}
+          CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
+        run: |
+          ssh -i ~/.ssh/notes_api_deploy \
+            -p "$CPANEL_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$CPANEL_USERNAME@$CPANEL_HOST" \
+            "cd '$DEPLOY_PATH' \
+              && npm ci --omit=dev \
+              && node --env-file=.env.next --input-type=module -e \"await import('./src/config/env.js')\" \
+              && mv .env.next .env \
+              && chmod 600 .env \
+              && mkdir -p tmp \
+              && touch tmp/restart.txt"
