@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  # Allows redeploying from the Actions tab (e.g. after changing the ENV_FILE secret) without a commit.
+  workflow_dispatch:
 
 concurrency:
   group: notes-api-production
