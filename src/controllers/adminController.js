@@ -3,6 +3,7 @@
  * router; these handlers call the admin service and send the response.
  */
 import * as adminService from '../services/adminService.js';
+import { getInterestGroups } from '../services/interestGroups.js';
 
 /**
  * GET /api/admin/users: a page of users, optionally filtered by name or email, optionally without
@@ -25,6 +26,17 @@ export async function listUsers(req, res) {
  */
 export async function createUser(req, res) {
   res.status(201).json({ user: await adminService.createUser(req.body) });
+}
+
+/**
+ * GET /api/admin/users/grouped-by-interest: users grouped by interest (Scenario 1, one aggregate call).
+ *
+ * @param {import('express').Request} req - Query: page, limit, interest?.
+ * @param {import('express').Response} res - 200 `{ data: [{ interest, count, users }], meta }`.
+ * @returns {Promise<void>}
+ */
+export async function listInterestGroups(req, res) {
+  res.json(await getInterestGroups(req.query));
 }
 
 /**

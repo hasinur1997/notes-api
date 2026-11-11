@@ -9,6 +9,7 @@ import mongoose from 'mongoose';
 import { connectDB, disconnectDB } from '../src/config/db.js';
 import { Note } from '../src/models/Note.js';
 import { User } from '../src/models/User.js';
+import { buildInterestGroupsPipeline } from '../src/services/interestGroups.js';
 import { accessibleBy, buildNotesFilter, buildSummaryPipeline } from '../src/services/noteService.js';
 
 const someUserId = new mongoose.Types.ObjectId();
@@ -120,6 +121,14 @@ const QUERIES = [
     name: 'admin: delete cascade, shared notes (updateMany filter)',
     index: 'collaborators_1__id_-1',
     run: () => Note.find({ collaborators: someUserId }).explain('executionStats'),
+  },
+  {
+    // Without ?interest= every user must be read to build every group, so that variant is a full
+    // scan by design and is not listed here.
+    name: 'admin: users grouped by interest, one interest (Scenario 1)',
+    index: 'interests_1',
+    run: () =>
+      User.aggregate(buildInterestGroupsPipeline({ interest: 'chess', skip: 0, limit: 10 })).explain('executionStats'),
   },
 ];
 

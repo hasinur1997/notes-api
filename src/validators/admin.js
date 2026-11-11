@@ -22,6 +22,17 @@ export const listUsersQuery = z
   })
   .strict();
 
+/**
+ * GET /api/admin/users/grouped-by-interest: a page of interest groups, optionally only one interest.
+ * The interest is trimmed and lowercased the same way stored interests are, so `Chess` matches `chess`.
+ */
+export const interestGroupsQuery = z
+  .object({
+    ...paginationQuery,
+    interest: z.string().trim().toLowerCase().min(1).max(50).optional(),
+  })
+  .strict();
+
 /** GET /api/admin/users/:id/notes: that user's notes as they see them, optionally pinned only / unpinned only. */
 export const userNotesQuery = z
   .object({

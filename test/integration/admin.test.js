@@ -56,6 +56,7 @@ describe('admin (integration)', { skip }, () => {
       ['PATCH', `/admin/users/${ann.id}`],
       ['DELETE', `/admin/users/${bob.id}`],
       ['GET', '/admin/notes'],
+      ['GET', '/admin/users/grouped-by-interest'],
     ];
     for (const [method, path] of routes) {
       const body = ['GET', 'DELETE'].includes(method) ? undefined : { name: 'X' };
@@ -217,5 +218,31 @@ describe('admin (integration)', { skip }, () => {
     assert.equal((await call(admin, 'GET', `/notes/${note._id}`)).status, 200);
     assert.equal((await call(admin, 'PATCH', `/notes/${note._id}`, { title: 'hacked' })).status, 404);
     assert.equal((await call(admin, 'DELETE', `/notes/${note._id}`)).status, 404);
+  });
+
+  it('groups users by interest, largest group first, paginated in one aggregate', async () => {
+    await call(admin, 'PATCH', `/admin/users/${ann.id}`, { interests: ['Chess', 'reading'] });
+    await call(admin, 'PATCH', `/admin/users/${bob.id}`, { interests: ['chess', 'music'] });
+
+    const all = await call(admin, 'GET', '/admin/users/grouped-by-interest?limit=2');
+    assert.equal(all.status, 200);
+    assert.deepEqual(all.body.meta, { page: 1, limit: 2, total: 3, totalPages: 2 });
+    assert.deepEqual(all.body.data.map((g) => [g.interest, g.count]), [['chess', 2], ['music', 1]]);
+    assert.deepEqual(all.body.data[0].users.map((u) => u.name).sort(), ['Ann', 'Bob']);
+    for (const user of all.body.data[0].users) assert.deepEqual(Object.keys(user).sort(), ['_id', 'email', 'name']);
+
+    const page2 = await call(admin, 'GET', '/admin/users/grouped-by-interest?limit=2&page=2');
+    assert.deepEqual(page2.body.data.map((g) => g.interest), ['reading']);
+
+    // Only the requested group, even though its users have other interests too; case-insensitive.
+    const chess = await call(admin, 'GET', '/admin/users/grouped-by-interest?interest=CHESS');
+    assert.deepEqual(chess.body.data.map((g) => [g.interest, g.count]), [['chess', 2]]);
+    assert.equal(chess.body.meta.total, 1);
+
+    const none = await call(admin, 'GET', '/admin/users/grouped-by-interest?interest=golf');
+    assert.deepEqual(none.body, { data: [], meta: { page: 1, limit: 10, total: 0, totalPages: 0 } });
+
+    assert.equal((await call(admin, 'GET', '/admin/users/grouped-by-interest?limit=51')).status, 400);
+    assert.equal((await call(admin, 'GET', '/admin/users/grouped-by-interest?foo=1')).status, 400);
   });
 });
