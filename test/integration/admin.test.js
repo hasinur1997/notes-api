@@ -11,6 +11,7 @@ import { User } from '../../src/models/User.js';
 import { connectTestDb, dropTestDb, skipWithoutDb as skip } from '../helpers/db.js';
 import { request, startServer } from '../helpers/http.js';
 import { signToken } from '../../src/utils/token.js';
+import { MAX_USERS_PER_GROUP } from '../../src/services/interestGroups.js';
 
 const PASSWORD = 'correct-horse';
 
@@ -248,5 +249,18 @@ describe('admin (integration)', { skip }, () => {
 
     assert.equal((await call(admin, 'GET', '/admin/users/grouped-by-interest?limit=51')).status, 400);
     assert.equal((await call(admin, 'GET', '/admin/users/grouped-by-interest?foo=1')).status, 400);
+  });
+
+  it('lists at most MAX_USERS_PER_GROUP users per group but counts all of them', async () => {
+    const extra = MAX_USERS_PER_GROUP + 2;
+    // insertMany skips the bcrypt save hook, so this stays fast.
+    await User.insertMany(
+      Array.from({ length: extra }, (_, i) => ({ name: `Player ${i}`, email: `player${i}@example.com`, password: 'x', interests: ['go'] })),
+    );
+    const res = await call(admin, 'GET', '/admin/users/grouped-by-interest?interest=go');
+    assert.equal(res.status, 200);
+    const [group] = res.body.data;
+    assert.equal(group.count, extra);
+    assert.equal(group.users.length, MAX_USERS_PER_GROUP);
   });
 });

@@ -1,7 +1,7 @@
 import '../helpers/setup.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildInterestGroupsPipeline } from '../../src/services/interestGroups.js';
+import { buildInterestGroupsPipeline, MAX_USERS_PER_GROUP } from '../../src/services/interestGroups.js';
 import { interestGroupsQuery } from '../../src/validators/admin.js';
 
 describe('buildInterestGroupsPipeline', () => {
@@ -12,7 +12,14 @@ describe('buildInterestGroupsPipeline', () => {
       ['$project', '$unwind', '$group', '$sort', '$facet'],
     );
     assert.deepEqual(pipeline.at(-2), { $sort: { count: -1, _id: 1 } });
-    assert.deepEqual(pipeline.at(-1).$facet, { meta: [{ $count: 'total' }], data: [{ $skip: 20 }, { $limit: 10 }] });
+    assert.deepEqual(pipeline.at(-1).$facet, {
+      meta: [{ $count: 'total' }],
+      data: [
+        { $skip: 20 },
+        { $limit: 10 },
+        { $project: { count: 1, users: { $slice: ['$users', MAX_USERS_PER_GROUP] } } },
+      ],
+    });
   });
 
   it('with an interest: matches first (index) and again after $unwind', () => {

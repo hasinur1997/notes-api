@@ -194,7 +194,7 @@ The frontend (`notes-web`) depends on these shapes. Do not change them.
 4. `$match: { interests: interest }` — only when provided
 5. `$group: { _id: "$interests", count: { $sum: 1 }, users: { $push: { _id, name, email } } }`
 6. `$sort: { count: -1, _id: 1 }`
-7. `$facet: { meta: [{ $count: "total" }], data: [{ $skip }, { $limit }] }`
+7. `$facet: { meta: [{ $count: "total" }], data: [{ $skip }, { $limit }, { $project: { count: 1, users: { $slice: ["$users", MAX_USERS_PER_GROUP] } } }] }` — each group lists at most 20 users (`count` stays the full size), so the single result document stays far below the 16 MB limit
 
 Then shape the result into the standard list contract in JavaScript (no extra DB call).
 

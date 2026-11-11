@@ -6,6 +6,13 @@ import { User } from '../models/User.js';
 import { buildListResponse, getPagination } from '../utils/pagination.js';
 
 /**
+ * Most users returned per interest group. `count` is always the full group size, so the page can
+ * say "and N more"; the cap keeps responses small and keeps the single $facet result document
+ * far below MongoDB's 16 MB limit however popular an interest gets.
+ */
+export const MAX_USERS_PER_GROUP = 20;
+
+/**
  * Builds the group-by-interest pipeline.
  *
  * With `interest`, the first $match uses the multikey { interests: 1 } index, so only the users
@@ -31,7 +38,17 @@ export function buildInterestGroupsPipeline({ interest, skip, limit }) {
       },
     },
     { $sort: { count: -1, _id: 1 } },
-    { $facet: { meta: [{ $count: 'total' }], data: [{ $skip: skip }, { $limit: limit }] } },
+    {
+      $facet: {
+        meta: [{ $count: 'total' }],
+        // Trimmed after paging, so only the groups on this page are touched.
+        data: [
+          { $skip: skip },
+          { $limit: limit },
+          { $project: { count: 1, users: { $slice: ['$users', MAX_USERS_PER_GROUP] } } },
+        ],
+      },
+    },
   ];
 }
 
@@ -41,7 +58,8 @@ export function buildInterestGroupsPipeline({ interest, skip, limit }) {
  * @param {{ page: number, limit: number, interest?: string }} query - Validated query; `interest`
  *   is already trimmed and lowercased like stored interests.
  * @returns {Promise<{ data: { interest: string, count: number, users: object[] }[], meta: object }>}
- *   Standard list response; `total` is the number of groups.
+ *   Standard list response; `total` is the number of groups. Each group lists at most
+ *   MAX_USERS_PER_GROUP users; `count` is the full number.
  */
 export async function getInterestGroups({ page, limit, interest }) {
   const { skip } = getPagination({ page, limit });
