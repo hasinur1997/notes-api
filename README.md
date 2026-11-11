@@ -18,7 +18,6 @@ The browser client lives in the sibling repo [`notes-web`](https://github.com/ha
 - [Testing](#testing)
 - [Project structure](#project-structure)
 - [API overview](#api-overview)
-- [Postman collection](#postman-collection)
 - [Aggregation pipelines](#aggregation-pipelines)
 - [Database indexes](#database-indexes)
 - [Deployment](#deployment)
@@ -206,7 +205,6 @@ src/
 ├── app.js         Express app (middleware + routes); does not listen
 └── server.js      connects to MongoDB, starts listening, shuts down gracefully
 scripts/           seed.js, sync-indexes.js, explain.js
-postman/           notes-api.postman_collection.json
 test/              helpers/, unit/, integration/
 ```
 
@@ -272,16 +270,6 @@ All routes are under `/api`. Protected routes need an `Authorization: Bearer <to
 | 409 | Duplicate (e.g. email already registered) |
 | 413 | Body over 100 kb, or image over 5 MB |
 | 429 | Rate limit reached |
-
----
-
-## Postman collection
-
-`postman/notes-api.postman_collection.json` has a request for every endpoint, grouped by resource. Import it in Postman (**File → Import**), then:
-
-1. Set the collection variable `baseUrl` (default `http://localhost:5000/api`; use `5001` on macOS).
-2. Run **Auth → Register** or **Auth → Login**, and **Auth → Login as admin** (uses `adminEmail` / `adminPassword`, which you set to your `ADMIN_*` values). Their test scripts save `token` and `adminToken`.
-3. Create a note or a post: the response's id is saved to `noteId` / `postId`, so the requests that need an id work right away.
 
 ---
 

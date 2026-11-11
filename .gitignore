@@ -6,3 +6,6 @@ npm-debug.log*
 .DS_Store
 coverage/
 uploads/
+
+# Postman collection (kept locally, not in the repo)
+postman/
