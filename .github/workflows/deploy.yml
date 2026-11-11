@@ -110,15 +110,19 @@ jobs:
           CPANEL_PORT: ${{ secrets.CPANEL_PORT }}
           CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
         # The server has no rsync, so files are sent as a tar archive over SSH.
-        # Only git-tracked files are shipped, so .env, node_modules, uploads/ and tmp/ on the server are
-        # never touched. .deploy-manifest lists what the last deploy shipped; files that were in it but
-        # are no longer tracked are removed from the server (like rsync --delete, limited to our own files).
+        # Only what the running app needs is shipped: the git-tracked files in RUNTIME_PATHS (src/, scripts/
+        # for seeding and index sync on the server, and the package files). Tests, docs, CI config and
+        # examples stay out, and .env, node_modules, uploads/ and tmp/ on the server are never touched.
+        # .deploy-manifest lists what the last deploy shipped; files that were in it but are not shipped
+        # now are removed from the server (like rsync --delete, limited to our own files).
         run: |
           set -euo pipefail
           SSH=(ssh -i ~/.ssh/notes_api_deploy -p "$CPANEL_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes
                "$CPANEL_USERNAME@$CPANEL_HOST")
 
-          git ls-files | grep -v '^\.github/' > .deploy-manifest.new
+          RUNTIME_PATHS=(src scripts package.json package-lock.json)
+          git ls-files -- "${RUNTIME_PATHS[@]}" > .deploy-manifest.new
+          echo "Shipping $(wc -l < .deploy-manifest.new) files: ${RUNTIME_PATHS[*]}"
           tar -czf "$RUNNER_TEMP/release.tgz" -T .deploy-manifest.new .deploy-manifest.new
 
           "${SSH[@]}" "cat > '$DEPLOY_PATH/tmp/release.tgz'" < "$RUNNER_TEMP/release.tgz"

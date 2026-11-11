@@ -304,7 +304,7 @@ Production runs on cPanel (Phusion Passenger), deployed by GitHub Actions (`.git
 1. **Test:** runs `npm ci` and `npm test`.
 2. **Deploy:**
    - Builds `.env` from the `ENV_FILE` secret, with `NODE_ENV` forced to `production`.
-   - Ships the git-tracked files over SSH with `tar`.
+   - Ships only what the running app needs over SSH with `tar`: `src/`, `scripts/` (for `npm run seed` and `npm run sync-indexes` on the server), `package.json` and `package-lock.json`. Tests, docs and CI files never reach the server, and files from an earlier deploy that are no longer shipped are removed.
    - Activates the app's cPanel Node.js environment and runs `npm install --omit=dev`.
    - Checks the new `.env` with the app's own schema, swaps it in, and restarts Passenger.
 
