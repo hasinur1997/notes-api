@@ -78,6 +78,8 @@ npm start              # node src/server.js (production)
 npm run seed           # creates the admin from ADMIN_NAME / ADMIN_EMAIL / ADMIN_PASSWORD (idempotent; never promotes an existing user)
 npm run seed -- --fake --email you@x.com [--count 120]  # add marked test notes (labels, pins, colours, reminders, sharing)
 npm run seed -- --clear-fake --email you@x.com           # remove exactly the marked test data (real notes untouched)
+npm run seed -- --sample-posts       # add 4 marked sample authors (with interests) and 15 public posts; reruns replace them
+npm run seed -- --clear-sample-posts # remove exactly the sample posts and authors
 npm run sync-indexes   # Model.syncIndexes() on all models, prints getIndexes()
 npm run explain        # runs explain("executionStats") on every query in the index map
 npm test               # unit tests; database tests also run when TEST_MONGO_URI is set
