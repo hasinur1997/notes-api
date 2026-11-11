@@ -217,7 +217,7 @@ All routes are under `/api`. Protected routes need an `Authorization: Bearer <to
 | Method | Endpoint | Access |
 |---|---|---|
 | GET | `/health` | Public |
-| POST | `/auth/register` | Public (role is always `user`) |
+| POST | `/auth/register` | Public, rate-limited (10 per hour). Role is always `user` |
 | POST | `/auth/login` | Public, rate-limited (10 attempts per 15 min) |
 | GET | `/auth/me` | Auth |
 | POST | `/auth/forgot-password` | Public, rate-limited (5 per 15 min) |

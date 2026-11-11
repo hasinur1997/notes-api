@@ -115,7 +115,7 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 
 | Method | Endpoint | Access |
 |---|---|---|
-| POST | `/api/auth/register` | Public — role is always forced to `user` |
+| POST | `/api/auth/register` | Public, rate-limited (10 per hour per IP; off when `NODE_ENV=test`) — role is always forced to `user` |
 | POST | `/api/auth/login` | Public, rate-limited |
 | GET | `/api/auth/me` | Auth |
 | POST | `/api/auth/forgot-password` | Public, rate-limited (5/15 min) — `{ email }`; always the same 200 reply; emails a 30-minute single-use link if the account exists |

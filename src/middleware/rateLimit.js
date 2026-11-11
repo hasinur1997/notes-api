@@ -2,6 +2,7 @@
  * Rate limiters for sensitive endpoints.
  */
 import { rateLimit } from 'express-rate-limit';
+import { env } from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
 
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -44,3 +45,35 @@ export const resetPasswordLimiter = rateLimit({
   legacyHeaders: false,
   handler: (req, res, next) => next(ApiError.tooManyRequests('Too many attempts, please try again later', 'RATE_LIMITED')),
 });
+
+const REGISTER_WINDOW_MS = 60 * 60 * 1000;
+/** Sign-ups allowed per IP per hour: plenty for a household or office, too few for a bot. */
+export const REGISTER_MAX_PER_WINDOW = 10;
+
+/**
+ * Builds the limiter for POST /api/auth/register. Every sign-up hashes a password with bcrypt
+ * (cost 12) and creates an account, so unlimited sign-ups could flood the users collection or
+ * tie up the CPU. Exceeding the limit returns a 429 in the standard error shape.
+ *
+ * @param {{ skip?: (req: import('express').Request) => boolean }} [options] - `skip` turns the limit off for a request.
+ * @returns {import('express').RequestHandler} Rate-limit middleware.
+ */
+export function createRegisterLimiter({ skip } = {}) {
+  return rateLimit({
+    windowMs: REGISTER_WINDOW_MS,
+    limit: REGISTER_MAX_PER_WINDOW,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    skip,
+    handler: (req, res, next) =>
+      next(ApiError.tooManyRequests('Too many accounts created from this network, please try again later', 'RATE_LIMITED')),
+  });
+}
+
+/**
+ * Limits POST /api/auth/register to 10 sign-ups per IP per hour. Off in the test environment,
+ * where the integration tests register many users from one address.
+ *
+ * @type {import('express').RequestHandler}
+ */
+export const registerLimiter = createRegisterLimiter({ skip: () => env.NODE_ENV === 'test' });
