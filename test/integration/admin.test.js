@@ -77,6 +77,19 @@ describe('admin (integration)', { skip }, () => {
     }
   });
 
+  it('leaves out the signed-in admin with excludeSelf, with and without a search', async () => {
+    const all = await call(admin, 'GET', '/admin/users?excludeSelf=true');
+    assert.equal(all.status, 200);
+    assert.deepEqual(all.body.data.map((u) => u.name), ['Bob', 'Ann']);
+    assert.deepEqual(all.body.meta, { page: 1, limit: 10, total: 2, totalPages: 1 });
+    const search = await call(admin, 'GET', '/admin/users?excludeSelf=true&q=example.com');
+    assert.deepEqual(search.body.meta.total, 2);
+    assert.equal(search.body.data.some((u) => u._id === admin.id), false);
+    const off = await call(admin, 'GET', '/admin/users?excludeSelf=false');
+    assert.equal(off.body.meta.total, 3);
+    assert.equal((await call(admin, 'GET', '/admin/users?excludeSelf=yes')).status, 400);
+  });
+
   it('searches users by any part of the name or email, case-insensitive and escaped', async () => {
     const byName = await call(admin, 'GET', '/admin/users?q=AN');
     assert.deepEqual(byName.body.data.map((u) => u.name), ['Ann']);

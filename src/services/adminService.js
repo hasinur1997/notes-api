@@ -24,18 +24,22 @@ function toAdminUser({ avatar, ...user }) {
  * A page of users, newest first, in the order of the _id index. Without `q` the total comes from
  * collection metadata (no scan). With `q`, users whose name or email contains it (escaped,
  * case-insensitive) are returned: an approved exception to the index rule, because substring
- * search cannot use an index and reads every user (see CLAUDE.md).
+ * search cannot use an index and reads every user (see CLAUDE.md). With `excludeSelf` the signed-in
+ * admin is left out (an `_id` range on the same index); without `q` the total is then the metadata
+ * count minus one, since the admin's own account always exists.
  *
- * @param {{ page: number, limit: number, q?: string }} query - Validated query.
+ * @param {{ page: number, limit: number, q?: string, excludeSelf?: boolean }} query - Validated query.
+ * @param {import('mongoose').Types.ObjectId} adminId - The signed-in admin.
  * @returns {Promise<{ data: object[], meta: object }>} Standard list response.
  */
-export async function listUsers({ page, limit, q }) {
+export async function listUsers({ page, limit, q, excludeSelf }, adminId) {
   const pattern = q ? new RegExp(escapeRegex(q), 'i') : null;
   const filter = pattern ? { $or: [{ name: pattern }, { email: pattern }] } : {};
+  if (excludeSelf) filter._id = { $ne: adminId };
   const { skip } = getPagination({ page, limit });
   const [users, total] = await Promise.all([
     User.find(filter, USER_FIELDS).sort({ _id: -1 }).skip(skip).limit(limit).lean(),
-    pattern ? User.countDocuments(filter) : User.estimatedDocumentCount(),
+    pattern ? User.countDocuments(filter) : User.estimatedDocumentCount().then((count) => (excludeSelf ? count - 1 : count)),
   ]);
   return buildListResponse(users.map(toAdminUser), { page, limit, total });
 }

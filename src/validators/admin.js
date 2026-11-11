@@ -10,8 +10,17 @@ import { booleanQuery } from './notes.js';
 
 const roleField = z.enum(ROLES);
 
-/** GET /api/admin/users: a page of users, optionally only those whose name or email contains `q`. */
-export const listUsersQuery = z.object({ ...paginationQuery, q: z.string().trim().min(1).max(100).optional() }).strict();
+/**
+ * GET /api/admin/users: a page of users, optionally only those whose name or email contains `q`,
+ * and optionally without the signed-in admin (`excludeSelf=true`).
+ */
+export const listUsersQuery = z
+  .object({
+    ...paginationQuery,
+    q: z.string().trim().min(1).max(100).optional(),
+    excludeSelf: booleanQuery.optional(),
+  })
+  .strict();
 
 /** GET /api/admin/users/:id/notes: that user's notes as they see them, optionally pinned only / unpinned only. */
 export const userNotesQuery = z

@@ -89,6 +89,11 @@ const QUERIES = [
     run: () => User.find({}).sort({ _id: -1 }).limit(10).explain('executionStats'),
   },
   {
+    name: "admin: users list without the signed-in admin (User's Notes)",
+    index: '_id_',
+    run: () => User.find({ _id: { $ne: someUserId } }).sort({ _id: -1 }).limit(10).explain('executionStats'),
+  },
+  {
     // Approved exception (2026-11-11): substring search on name/email cannot use an index; it
     // walks the _id index (keeping newest-first order, no in-memory sort) and filters every user.
     name: 'admin: user search by name or email (approved full read)',

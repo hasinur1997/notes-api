@@ -5,14 +5,15 @@
 import * as adminService from '../services/adminService.js';
 
 /**
- * GET /api/admin/users: a page of users, optionally filtered by name or email.
+ * GET /api/admin/users: a page of users, optionally filtered by name or email, optionally without
+ * the signed-in admin.
  *
- * @param {import('express').Request} req - Query: page, limit, q?.
+ * @param {import('express').Request} req - Query: page, limit, q?, excludeSelf?.
  * @param {import('express').Response} res - 200 `{ data, meta }`.
  * @returns {Promise<void>}
  */
 export async function listUsers(req, res) {
-  res.json(await adminService.listUsers(req.query));
+  res.json(await adminService.listUsers(req.query, req.user._id));
 }
 
 /**
