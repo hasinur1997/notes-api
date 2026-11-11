@@ -1,6 +1,6 @@
 # notes-api
 
-REST API for **Notes**, a note-taking app with private notes, sharing, labels, reminders, images and an admin area. It uses JWT authentication and role-based access control (`user` / `admin`).
+REST API for **Notes**, a note-taking app with private notes, public posts, sharing, labels, reminders, images and an admin area. It uses JWT authentication and role-based access control (`user` / `admin`).
 
 The browser client lives in the sibling repo [`notes-web`](https://github.com/hasinur1997/notes-web).
 
@@ -18,6 +18,8 @@ The browser client lives in the sibling repo [`notes-web`](https://github.com/ha
 - [Testing](#testing)
 - [Project structure](#project-structure)
 - [API overview](#api-overview)
+- [Postman collection](#postman-collection)
+- [Aggregation pipelines](#aggregation-pipelines)
 - [Database indexes](#database-indexes)
 - [Deployment](#deployment)
 - [Troubleshooting](#troubleshooting)
@@ -29,7 +31,8 @@ The browser client lives in the sibling repo [`notes-web`](https://github.com/ha
 - **Accounts:** register, log in and get a JWT, view and edit the profile (name, interests, avatar), per-account settings, and password reset by email.
 - **Notes:** create, read, update and delete notes in Markdown. Notes support labels, pinning, colours, reminders, up to 5 images, and multi-word search.
 - **Sharing:** add up to 10 collaborators per note. Collaborators can edit, and only the owner can delete.
-- **Admin:** manage users (create, edit, delete, change role, search) and read any user's notes.
+- **Public posts:** anyone can read the feed, a single post, and a user's profile with their posts. Signed-in users publish posts (Markdown, colour, up to 5 images) and only the author can edit or delete them.
+- **Admin:** manage users (create, edit, delete, change role, search), read any user's notes, and see users grouped by interest.
 - **Security:** bcrypt (cost 12) password hashing, and JWTs that can be revoked when the password changes. Every request is validated with strict zod schemas, and ownership is checked inside the database query. The API also uses helmet, a CORS allowlist, rate limits on login and password reset, and a 100 kb JSON body limit.
 
 ## Requirements
@@ -117,6 +120,13 @@ npm run seed -- --clear-fake --email you@example.com        # remove only the sa
 
 Sample data is marked, so `--clear-fake` never touches real notes.
 
+To fill the public feed, add sample authors (with interests) and 15 posts:
+
+```bash
+npm run seed -- --sample-posts        # running it again replaces the earlier samples
+npm run seed -- --clear-sample-posts  # remove only the sample posts and authors
+```
+
 ### 7. Run the web app
 
 Follow the setup in [`notes-web`](https://github.com/hasinur1997/notes-web). Keep `CORS_ORIGIN` here set to the web app's address (`http://localhost:3000` by default).
@@ -186,7 +196,7 @@ Tests never read your `.env` values for `MONGO_URI` or `JWT_SECRET`. `test/helpe
 ```
 src/
 ├── config/        env.js (validated with zod), db.js
-├── models/        User.js, Note.js (schema + schema.index() only)
+├── models/        User.js, Note.js, Post.js (schema + schema.index() only)
 ├── middleware/    auth, requireRole, validate, upload, rateLimit, errorHandler
 ├── validators/    zod schemas per resource
 ├── controllers/   thin: read the validated request → call a service → send the response
@@ -196,6 +206,7 @@ src/
 ├── app.js         Express app (middleware + routes); does not listen
 └── server.js      connects to MongoDB, starts listening, shuts down gracefully
 scripts/           seed.js, sync-indexes.js, explain.js
+postman/           notes-api.postman_collection.json
 test/              helpers/, unit/, integration/
 ```
 
@@ -231,6 +242,13 @@ All routes are under `/api`. Protected routes need an `Authorization: Bearer <to
 | GET, PATCH, DELETE | `/admin/users/:id` | Admin |
 | GET | `/admin/users/:id/notes` | Admin |
 | GET | `/admin/notes` | Admin (`?owner=` filter) |
+| GET | `/admin/users/grouped-by-interest` | Admin (`?interest=` filter). Scenario 1 |
+| GET, POST | `/posts` | GET public (the feed, newest first), POST auth |
+| GET | `/posts/:id` | Public |
+| PATCH, DELETE | `/posts/:id` | Author |
+| POST | `/posts/:id/images` | Author (multipart `image`, ≤ 5 MB) |
+| PUT, DELETE | `/posts/:id/images/:imageId` | Author |
+| GET | `/users/:id/posts` | Public: profile and posts in one pipeline. Scenario 2 |
 
 ### Response shapes
 
@@ -257,6 +275,24 @@ All routes are under `/api`. Protected routes need an `Authorization: Bearer <to
 
 ---
 
+## Postman collection
+
+`postman/notes-api.postman_collection.json` has a request for every endpoint, grouped by resource. Import it in Postman (**File → Import**), then:
+
+1. Set the collection variable `baseUrl` (default `http://localhost:5000/api`; use `5001` on macOS).
+2. Run **Auth → Register** or **Auth → Login**, and **Auth → Login as admin** (uses `adminEmail` / `adminPassword`, which you set to your `ADMIN_*` values). Their test scripts save `token` and `adminToken`.
+3. Create a note or a post: the response's id is saved to `noteId` / `postId`, so the requests that need an id work right away.
+
+---
+
+## Aggregation pipelines
+
+**Scenario 1: users grouped by interest** (`src/services/interestGroups.js`, `GET /admin/users/grouped-by-interest`). Exactly one `User.aggregate()` call: `$match` on `interests` (only with `?interest=`, served by `{ interests: 1 }`) → `$project` → `$unwind` → `$match` again (keeps just that interest) → `$group` with a count and the users → `$sort` → `$facet` for the page and the total. No other database call.
+
+**Scenario 2: a user's posts** (`src/services/postService.js`, `GET /users/:id/posts`). One pipeline on `users`: `$match` on `_id` → `$project` public fields (never the email) → `$lookup` into `posts` with a page of posts newest first → a second `$lookup` with `$count` for the total. Both lookups use `{ author: 1, _id: -1 }`.
+
+---
+
 ## Database indexes
 
 Indexes are kept to the minimum on purpose. Every query is backed by one of these, and no index exists without a query that needs it:
@@ -267,6 +303,7 @@ Indexes are kept to the minimum on purpose. Every query is backed by one of thes
 | users | `{ interests: 1 }` | — |
 | notes | `{ owner: 1, _id: -1 }` | — |
 | notes | `{ collaborators: 1, _id: -1 }` | — |
+| posts | `{ author: 1, _id: -1 }` | — |
 
 Indexes are defined only with `schema.index()` in `src/models/`, and lists are sorted by `_id` (newest first), never by `createdAt`. After changing a query or a model, run `npm run explain` to confirm every query still uses its index.
 
