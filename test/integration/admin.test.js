@@ -6,6 +6,7 @@ import '../helpers/setup.js';
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { Note } from '../../src/models/Note.js';
+import { Post } from '../../src/models/Post.js';
 import { User } from '../../src/models/User.js';
 import { connectTestDb, dropTestDb, skipWithoutDb as skip } from '../helpers/db.js';
 import { request, startServer } from '../helpers/http.js';
@@ -20,7 +21,7 @@ describe('admin (integration)', { skip }, () => {
   let bob;
 
   before(async () => {
-    await connectTestDb('admin', [User, Note]);
+    await connectTestDb('admin', [User, Note, Post]);
     api = await startServer();
   });
 
@@ -36,7 +37,7 @@ describe('admin (integration)', { skip }, () => {
   }
 
   beforeEach(async () => {
-    await Promise.all([User.deleteMany({}), Note.deleteMany({})]);
+    await Promise.all([User.deleteMany({}), Note.deleteMany({}), Post.deleteMany({})]);
     // Signed directly: the login endpoint is rate-limited, and only some tests are about signing in.
     const adminUser = await new User({ name: 'Admin', email: 'admin@example.com', password: PASSWORD, role: 'admin' }).save();
     admin = { token: signToken(adminUser), id: String(adminUser._id) };
@@ -188,8 +189,10 @@ describe('admin (integration)', { skip }, () => {
     assert.equal((await call(admin, 'DELETE', `/admin/users/${ghost}`)).status, 404);
   });
 
-  it('deleting a user removes their notes and their place on shared notes', async () => {
+  it('deleting a user removes their notes, posts and their place on shared notes', async () => {
     const own = await call(bob, 'POST', '/notes', { title: 'Bob note' });
+    await call(bob, 'POST', '/posts', { title: 'Bob post' });
+    assert.equal(await Post.countDocuments({ author: bob.id }), 1);
     const shared = await call(ann, 'POST', '/notes', { title: 'Ann shares' });
     await call(ann, 'POST', `/notes/${shared.body.note._id}/collaborators`, { email: bob.email });
     const res = await call(admin, 'DELETE', `/admin/users/${bob.id}`);
@@ -197,6 +200,7 @@ describe('admin (integration)', { skip }, () => {
     assert.equal(await User.findById(bob.id), null);
     assert.equal(await Note.findById(own.body.note._id), null);
     assert.deepEqual((await Note.findById(shared.body.note._id).lean()).collaborators, []);
+    assert.equal(await Post.countDocuments({ author: bob.id }), 0, 'their posts are deleted too');
     assert.equal((await call(bob, 'GET', '/auth/me')).status, 401);
   });
 

@@ -3,6 +3,7 @@
  * as admins (the /api/admin router uses requireRole('admin')).
  */
 import { Note } from '../models/Note.js';
+import { Post } from '../models/Post.js';
 import { User } from '../models/User.js';
 import { ApiError } from '../utils/ApiError.js';
 import { deleteImages } from '../utils/imageStorage.js';
@@ -121,9 +122,9 @@ export async function updateUser(actor, id, input) {
 }
 
 /**
- * Deletes an account and everything that belongs to it: its notes (and their images), its
- * profile photo, and its place on other people's shared notes. Every query is on an indexed
- * field (_id, owner, collaborators).
+ * Deletes an account and everything that belongs to it: its notes and posts (and their images),
+ * its profile photo, and its place on other people's shared notes. Every query is on an indexed
+ * field (_id, owner, collaborators, author).
  *
  * @param {{ _id: import('mongoose').Types.ObjectId }} actor - The admin deleting.
  * @param {string} id - Validated ObjectId string.
@@ -135,12 +136,16 @@ export async function deleteUser(actor, id) {
   const user = await User.findByIdAndDelete(id).lean();
   if (!user) throw ApiError.notFound('User not found');
 
-  const owned = await Note.find({ owner: user._id }, { images: 1 }).lean();
+  const [owned, posts] = await Promise.all([
+    Note.find({ owner: user._id }, { images: 1 }).lean(),
+    Post.find({ author: user._id }, { images: 1 }).lean(),
+  ]);
   await Promise.all([
     Note.deleteMany({ owner: user._id }),
     Note.updateMany({ collaborators: user._id }, { $pull: { collaborators: user._id } }),
+    Post.deleteMany({ author: user._id }),
   ]);
-  const files = owned.flatMap((note) => (note.images ?? []).map((image) => image.publicId));
+  const files = [...owned, ...posts].flatMap((doc) => (doc.images ?? []).map((image) => image.publicId));
   if (user.avatar?.publicId) files.push(user.avatar.publicId);
   await deleteImages(files);
 }

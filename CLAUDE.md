@@ -91,7 +91,7 @@ src/
 ├── models/        User.js, Note.js, Post.js   ← schema + schema.index() only
 ├── middleware/    auth.js, requireRole.js, validate.js, errorHandler.js, rateLimit.js
 ├── controllers/   thin: parse request → call service/model → send response
-├── services/      business logic and pipelines (noteService.js, adminService.js, interestGroups.js, userPosts.js)
+├── services/      business logic and pipelines (noteService.js, adminService.js, interestGroups.js, postService.js)
 ├── routes/        one file per resource, mounted under /api
 ├── validators/    zod schemas per resource (auth.js, ...), shared field rules
 ├── utils/         pagination.js, ApiError.js, asyncHandler.js, token.js
@@ -107,7 +107,7 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 |---|---|
 | users | `name`, `email` (lowercase, trimmed), `password` (`select: false`), `role` (`user` \| `admin`, default `user`), `interests` ([String], lowercased, trimmed, deduped), `labels` ([String], max 100: labels created in "Edit labels" before any note uses them), `avatar` ({ url, publicId, width, height } or `null`), `settings` ({ `notesPagination`: `pages` \| `infinite` (default `pages`), `notesPerPage`: 12 \| 24 \| 48 (default 12) }), `resetPasswordTokenHash` / `resetPasswordExpiresAt` (`select: false`, SHA-256 of the emailed token), `tokenVersion` (`select: false`, in every JWT as `tv`; a password reset increments it to revoke older tokens), timestamps |
 | notes | `owner` (ObjectId → users, required), `title` (required, max 200), `content` (Markdown, max 20,000), `labels` ([String], max 10, trimmed, case-insensitive deduped, each max 30), `pinned` (Boolean, default `false`), `color` (palette key, default `default`), `reminderAt` (Date or `null`), `collaborators` ([ObjectId → users], max 10), `images` ([{ url, publicId, width, height }], max 5, stored on Cloudinary), timestamps |
-| posts | `author` (ObjectId → users, required), `title` (required), `body`, timestamps |
+| posts | `author` (ObjectId → users, required), `title` (required, max 200), `content` (Markdown, max 20,000), `color` (same palette as notes), `images` (same as notes, max 5), timestamps. Same editor as notes, without labels, pin, reminder or sharing |
 
 ### 3.4 Endpoints
 
@@ -136,8 +136,11 @@ test/              helpers/ (setup, http), unit/ (no DB), integration/ (needs TE
 | GET | `/api/admin/users/:id/notes` | Admin — that user's notes as they see them (owned + shared, `?pinned=`), read-only, same filter and indexes as `GET /api/notes`; 404 if the user does not exist |
 | GET | `/api/admin/notes?owner=` | Admin — every note newest first, read-only (`_id` index; with `owner`, `{ owner: 1, _id: -1 }`); notes include `owner` / `collaborators` as people |
 | GET | `/api/admin/users/grouped-by-interest?interest=` | Admin — Scenario 1 |
-| GET, POST | `/api/posts` | GET public, POST auth |
-| GET | `/api/users/:id/posts` | Public — Scenario 2 |
+| GET, POST | `/api/posts` | GET public (newest first, `_id` index, author `{ _id, name, avatar }` via `$lookup` on users `_id`; total from `estimatedDocumentCount`), POST auth `{ title, content?, color? }` |
+| GET | `/api/posts/:id` | Public — one post with its author |
+| PATCH, DELETE | `/api/posts/:id` | Author only (`{ _id, author }` in the query; others get 404). DELETE also deletes the images |
+| POST, PUT, DELETE | `/api/posts/:id/images[/:imageId]` | Author only — same rules as note images |
+| GET | `/api/users/:id/posts` | Public — Scenario 2: `{ user: { _id, name, avatar, interests, createdAt }, data, meta }`; 404 if the user does not exist |
 | GET | `/api/health` | Public |
 
 ### 3.5 Response Contracts
@@ -193,10 +196,10 @@ The frontend (`notes-web`) depends on these shapes. Do not change them.
 
 Then shape the result into the standard list contract in JavaScript (no extra DB call).
 
-**Scenario 2 — `services/userPosts.js`**
+**Scenario 2 — `services/postService.js` (`buildUserPostsPipeline`)**
 
 1. `$match: { _id: userId }`
-2. `$project` public fields only (`name`, `email`, `interests`)
+2. `$project` public fields only (`name`, `interests`, `avatar`, `createdAt`; email is private and never projected)
 3. `$lookup: { from: "posts", localField: "_id", foreignField: "author", pipeline: [{ $sort: { _id: -1 } }, { $skip }, { $limit }], as: "posts" }`
 4. `$lookup` (same keys) with `pipeline: [{ $count: "total" }]` as `postCount` for pagination meta
 

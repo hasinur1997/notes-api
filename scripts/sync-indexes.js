@@ -8,15 +8,17 @@
 import mongoose from 'mongoose';
 import { connectDB, disconnectDB } from '../src/config/db.js';
 import { Note } from '../src/models/Note.js';
+import { Post } from '../src/models/Post.js';
 import { User } from '../src/models/User.js';
 
 /** Allowed index names per collection (CLAUDE.md, Hard Rules), besides _id_. */
 const ALLOWED = {
   users: ['email_1', 'interests_1'],
   notes: ['owner_1__id_-1', 'collaborators_1__id_-1'],
+  posts: ['author_1__id_-1'],
 };
 
-const MODELS = [User, Note];
+const MODELS = [User, Note, Post];
 
 /**
  * Syncs and checks every model's indexes.

@@ -13,7 +13,7 @@ export const MAX_IMAGES_PER_NOTE = 5;
 export const NOTE_COLORS = Object.freeze(['default', 'amber', 'coral', 'rose', 'lavender', 'sky', 'mint', 'sand']);
 
 /** An image stored on Cloudinary. `publicId` is kept so the file can be deleted with the note. */
-const imageSchema = new mongoose.Schema(
+export const imageSchema = new mongoose.Schema(
   {
     url: { type: String, required: true },
     publicId: { type: String, required: true },

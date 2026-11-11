@@ -9,13 +9,17 @@ import mongoose from 'mongoose';
 import { connectDB, disconnectDB } from '../src/config/db.js';
 import { Note } from '../src/models/Note.js';
 import { User } from '../src/models/User.js';
+import { Post } from '../src/models/Post.js';
 import { buildInterestGroupsPipeline } from '../src/services/interestGroups.js';
+import { buildFeedPipeline, buildUserPostsPipeline } from '../src/services/postService.js';
 import { accessibleBy, buildNotesFilter, buildSummaryPipeline } from '../src/services/noteService.js';
 
 const someUserId = new mongoose.Types.ObjectId();
 /** Owned-or-shared queries must use both note indexes (one per $or branch). */
 const BOTH = { all: ['owner_1__id_-1', 'collaborators_1__id_-1'] };
 const someNoteId = new mongoose.Types.ObjectId();
+/** A real user, so $lookup stages actually run and report the index they used (set before explaining). */
+let realUserId = someUserId;
 
 /** Every query in the index map: a name, the expected index, and a function returning its explain output. */
 const QUERIES = [
@@ -130,7 +134,38 @@ const QUERIES = [
     run: () =>
       User.aggregate(buildInterestGroupsPipeline({ interest: 'chess', skip: 0, limit: 10 })).explain('executionStats'),
   },
+  {
+    name: 'posts feed, newest first (+ author $lookup on users _id)',
+    index: '_id_',
+    lookupIndex: '_id_',
+    run: () => Post.aggregate(buildFeedPipeline({ skip: 0, limit: 10 })).explain('executionStats'),
+  },
+  {
+    name: 'post by id (get), post by id + author (update / delete / images)',
+    index: '_id_',
+    run: () => Post.findOne({ _id: someNoteId, author: someUserId }).explain('executionStats'),
+  },
+  {
+    name: "user's posts: users $match + $lookup into posts (Scenario 2)",
+    index: '_id_',
+    lookupIndex: 'author_1__id_-1',
+    run: () => User.aggregate(buildUserPostsPipeline(String(realUserId), { skip: 0, limit: 10 })).explain('executionStats'),
+  },
+  {
+    name: 'admin: delete cascade, posts by author',
+    index: 'author_1__id_-1',
+    run: () => Post.find({ author: someUserId }).explain('executionStats'),
+  },
 ];
+
+/**
+ * $lookup stages from aggregate explain output. Each reports `indexesUsed` and `collectionScans`
+ * in executionStats, but only once it has run (an empty collection or no input documents
+ * leaves both empty).
+ */
+function lookupStages(explain) {
+  return (explain?.stages ?? []).filter((stage) => stage.$lookup);
+}
 
 /** Recursively collects stage names and index names from an explain plan tree. */
 function collectStages(node, out = { stages: [], indexes: [] }) {
@@ -161,21 +196,31 @@ function winningPlan(explain) {
 async function explainAll() {
   let ok = true;
   for (const query of QUERIES) {
-    const { stages, indexes } = collectStages(winningPlan(await query.run()));
+    const explain = await query.run();
+    const { stages, indexes } = collectStages(winningPlan(explain));
     const usesIndex = query.index.all
       ? query.index.all.every((name) => indexes.includes(name))
       : [].concat(query.index).some((name) => indexes.includes(name)) ||
         ([].concat(query.index).includes('_id_') && stages.includes('IDHACK'));
-    const pass = usesIndex && !stages.includes('COLLSCAN') && !stages.includes('SORT');
+    const lookupRuns = query.lookupIndex ? lookupStages(explain) : [];
+    const lookups = [...new Set(lookupRuns.flatMap((stage) => stage.indexesUsed ?? []))];
+    const scanned = lookupRuns.some((stage) => stage.collectionScans > 0);
+    // Passes when the intended index was used, or when no lookup ran (no data) and nothing was scanned.
+    const lookupOk = !query.lookupIndex || (!scanned && (lookups.includes(query.lookupIndex) || lookups.length === 0));
+    const pass = usesIndex && lookupOk && !stages.includes('COLLSCAN') && !stages.includes('SORT');
     ok &&= pass;
     console.log(`${pass ? 'PASS' : 'FAIL'}  ${query.name}`);
     console.log(`      index: ${indexes.join(', ') || '-'}  stages: ${[...new Set(stages)].join(' > ')}`);
+    if (query.lookupIndex) {
+      console.log(`      $lookup index: ${lookups.join(', ') || '- (did not run: no data)'}${scanned ? '  COLLECTION SCAN' : ''}`);
+    }
   }
   return ok;
 }
 
 try {
   await connectDB();
+  realUserId = (await User.findOne({}, { _id: 1 }).lean())?._id ?? someUserId;
   const ok = await explainAll();
   console.log(ok ? '\nOK: every query uses its index.' : '\nFAILED: see FAIL lines above.');
   process.exitCode = ok ? 0 : 1;
