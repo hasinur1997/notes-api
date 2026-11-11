@@ -263,4 +263,23 @@ describe('admin (integration)', { skip }, () => {
     assert.equal(group.count, extra);
     assert.equal(group.users.length, MAX_USERS_PER_GROUP);
   });
+
+  it('keeps the account when deleting its content fails part-way, so the delete can be retried', async () => {
+    await call(bob, 'POST', '/posts', { title: 'Bob post' });
+    const original = Post.deleteMany;
+    Post.deleteMany = () => Promise.reject(new Error('simulated database failure'));
+    const consoleError = console.error;
+    console.error = () => {}; // the error handler logs the simulated 500
+    try {
+      assert.equal((await call(admin, 'DELETE', `/admin/users/${bob.id}`)).status, 500);
+    } finally {
+      Post.deleteMany = original;
+      console.error = consoleError;
+    }
+    assert.ok(await User.findById(bob.id), 'account is still there');
+
+    assert.equal((await call(admin, 'DELETE', `/admin/users/${bob.id}`)).status, 204);
+    assert.equal(await User.findById(bob.id), null);
+    assert.equal(await Post.countDocuments({ author: bob.id }), 0);
+  });
 });

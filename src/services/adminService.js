@@ -126,6 +126,9 @@ export async function updateUser(actor, id, input) {
  * its profile photo, and its place on other people's shared notes. Every query is on an indexed
  * field (_id, owner, collaborators, author).
  *
+ * The account is deleted last. If anything fails part-way, the account still exists and the
+ * admin can simply delete it again; no notes or posts are ever left without an owner.
+ *
  * @param {{ _id: import('mongoose').Types.ObjectId }} actor - The admin deleting.
  * @param {string} id - Validated ObjectId string.
  * @returns {Promise<void>}
@@ -133,7 +136,7 @@ export async function updateUser(actor, id, input) {
  */
 export async function deleteUser(actor, id) {
   if (actor._id.equals(id)) throw ApiError.forbidden("You can't delete your own account", 'SELF_DELETE');
-  const user = await User.findByIdAndDelete(id).lean();
+  const user = await User.findById(id, { avatar: 1 }).lean();
   if (!user) throw ApiError.notFound('User not found');
 
   const [owned, posts] = await Promise.all([
@@ -145,6 +148,9 @@ export async function deleteUser(actor, id) {
     Note.updateMany({ collaborators: user._id }, { $pull: { collaborators: user._id } }),
     Post.deleteMany({ author: user._id }),
   ]);
+  await User.deleteOne({ _id: user._id });
+
+  // Files go last: a failed request never leaves a note or post pointing at a deleted file.
   const files = [...owned, ...posts].flatMap((doc) => (doc.images ?? []).map((image) => image.publicId));
   if (user.avatar?.publicId) files.push(user.avatar.publicId);
   await deleteImages(files);
